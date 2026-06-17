@@ -5,6 +5,7 @@ from engine.block import Block
 
 class Grid:
     """Fixed-size 0/1 8x8 grid with Block Blast-style placement and line clearing."""
+    """Grid is customizable in size but has to be a square and is 8x8 by default."""
 
     def __init__(self, size: int = 8, cells: list[list[int]] | None = None) -> None:
         if size <= 0:
@@ -45,16 +46,16 @@ class Grid:
                 return False
         return True
 
-    def place(self, block: Block, row: int, col: int) -> int:
+    def place(self, block: Block, row: int, col: int) -> None:
         if not self.can_place(block, row, col):
             raise ValueError(f"cannot place block {block.name!r} at ({row}, {col})")
 
         for row_offset, col_offset in block.cells:
             self._cells[row + row_offset][col + col_offset] = 1
 
-        return self.clear_full_lines()
-
     def clear_full_lines(self) -> int:
+        # TODO - Optimization can be made by only scanning rows and columns that were affected by the placement of the block
+
         full_rows = {row for row in range(self.size) if all(self._cells[row])}
         full_cols = {
             col for col in range(self.size) if all(self._cells[row][col] for row in range(self.size))

@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Block Blast — Manual Grid</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Courier New', monospace;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 28px 32px;
+    }
+    h1 {
+      font-size: 1.1rem;
+      letter-spacing: 3px;
+      color: #7dd3fc;
+      margin-bottom: 24px;
+    }
+    .layout {
+      display: flex;
+      gap: 28px;
+      align-items: flex-start;
+    }
+    .left-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* grid */
+    .grid-wrap {
+      display: flex;
+      gap: 4px;
+    }
+    .axis-col {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding-top: 22px;
+    }
+    .axis-cell {
+      width: 18px;
+      height: 50px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: #475569;
+    }
+    .grid-col {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .axis-row {
+      display: flex;
+      gap: 3px;
+      margin-bottom: 3px;
+      margin-left: 0;
+    }
+    .axis-row-cell {
+      width: 50px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: #475569;
+    }
+    .grid-container {
+      display: grid;
+      grid-template-columns: repeat(8, 50px);
+      gap: 3px;
+    }
+    .cell {
+      width: 50px;
+      height: 50px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 4px;
+      transition: background 0.08s, border-color 0.08s;
+    }
+    .cell.filled     { background: #2563eb; border-color: #1d4ed8; }
+    .cell.p-valid    { background: #93c5fd; border-color: #60a5fa; }
+    .cell.p-invalid  { background: #ef4444; border-color: #dc2626; opacity: 0.7; }
+    @keyframes flash-clear {
+      0%, 100% { background: #2563eb; border-color: #1d4ed8; }
+      50%      { background: #fbbf24; border-color: #f59e0b; }
+    }
+    .cell.clearing { animation: flash-clear 0.5s ease-in-out; }
+
+    /* input */
+    .input-section { display: flex; flex-direction: column; gap: 10px; }
+    .input-row { display: flex; gap: 8px; }
+    #block-input {
+      flex: 1;
+      padding: 10px 14px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-family: inherit;
+      font-size: 0.9rem;
+      outline: none;
+      min-width: 280px;
+    }
+    #block-input:focus { border-color: #3b82f6; }
+    #block-input.valid   { border-color: #22c55e; }
+    #block-input.invalid { border-color: #ef4444; }
+    button {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 0.8rem;
+      font-weight: bold;
+      cursor: pointer;
+      letter-spacing: 1px;
+    }
+    button:hover:not(:disabled) { opacity: 0.85; }
+    #place-btn { background: #2563eb; color: #fff; }
+    #place-btn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+    #reset-btn { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+    #status {
+      font-size: 0.78rem;
+      min-height: 1.1em;
+      color: #64748b;
+    }
+    #status.ok  { color: #22c55e; }
+    #status.err { color: #ef4444; }
+
+    /* right panel */
+    .right-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 200px;
+    }
+    .panel {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .panel h3 {
+      font-size: 0.65rem;
+      letter-spacing: 2px;
+      color: #475569;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    .block-list {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+    .block-name {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      padding: 4px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .block-name:hover { background: #334155; color: #e2e8f0; }
+    .block-name.selected { background: #1e3a5f; color: #7dd3fc; border-left: 2px solid #3b82f6; padding-left: 4px; }
+    .grid-container.pick-mode .cell { cursor: crosshair; }
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .h-item {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      padding: 4px 6px;
+      border-left: 2px solid #334155;
+    }
+    .h-item .hname { color: #7dd3fc; }
+    .h-item .hlines { color: #86efac; }
+    .empty-note { font-size: 0.72rem; color: #475569; padding: 4px 0; }
+  </style>
+</head>
+<body>
+  <h1>BLOCK BLAST — MANUAL GRID</h1>
+
+  <div class="layout">
+    <div class="left-panel">
+      <div class="grid-wrap">
+        <div class="axis-col" id="row-labels"></div>
+        <div class="grid-col">
+          <div class="axis-row" id="col-labels"></div>
+          <div class="grid-container" id="grid"></div>
+        </div>
+      </div>
+
+      <div class="input-section">
+        <div class="input-row">
+          <input id="block-input" type="text" placeholder="THREE_BY_THREE, (2, 3)" autocomplete="off" spellcheck="false" />
+          <button id="place-btn" disabled>PLACE</button>
+          <button id="reset-btn">RESET</button>
+        </div>
+        <div id="status"></div>
+      </div>
+    </div>
+
+    <div class="right-panel">
+      <div class="panel">
+        <h3>Block Catalog</h3>
+        <div class="block-list" id="block-list"><span class="empty-note">Loading...</span></div>
+      </div>
+      <div class="panel">
+        <h3>History</h3>
+        <div class="history-list" id="history"><span class="empty-note">No placements yet</span></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SIZE = 8;
+    let currentGrid = Array.from({length: SIZE}, () => Array(SIZE).fill(0));
+    let previewCells = [];
+    let previewValid = false;
+    let debounceTimer = null;
+    let selectedBlock = null;  // set by catalog click
+    let hoveredCell = null;    // {r, c} when mouse is over grid in pick mode
+    let isAnimating = false;
+
+    // ── DOM construction ──────────────────────────────────────────────────────
+
+    (function buildDOM() {
+      const colLabels = document.getElementById('col-labels');
+      for (let c = 0; c < SIZE; c++) {
+        const d = document.createElement('div');
+        d.className = 'axis-row-cell';
+        d.textContent = c;
+        colLabels.appendChild(d);
+      }
+      const rowLabels = document.getElementById('row-labels');
+      for (let r = 0; r < SIZE; r++) {
+        const d = document.createElement('div');
+        d.className = 'axis-cell';
+        d.textContent = r;
+        rowLabels.appendChild(d);
+      }
+      const grid = document.getElementById('grid');
+      for (let r = 0; r < SIZE; r++) {
+        for (let c = 0; c < SIZE; c++) {
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          cell.dataset.r = r;
+          cell.dataset.c = c;
+          grid.appendChild(cell);
+        }
+      }
+    })();
+
+    // ── Rendering ─────────────────────────────────────────────────────────────
+
+    function renderGrid() {
+      const previewSet = new Set(previewCells.map(([r, c]) => `${r},${c}`));
+      document.querySelectorAll('.cell').forEach(cell => {
+        const r = +cell.dataset.r, c = +cell.dataset.c;
+        cell.className = 'cell';
+        if (previewSet.has(`${r},${c}`)) {
+          cell.classList.add(previewValid ? 'p-valid' : 'p-invalid');
+        } else if (currentGrid[r]?.[c]) {
+          cell.classList.add('filled');
+        }
+      });
+    }
+
+    function renderHistory(history) {
+      const el = document.getElementById('history');
+      if (!history.length) { el.innerHTML = '<span class="empty-note">No placements yet</span>'; return; }
+      el.innerHTML = [...history].reverse().map(h =>
+        `<div class="h-item"><span class="hname">${h.block}</span> @ (${h.row}, ${h.col})${h.lines_cleared ? ` <span class="hlines">+${h.lines_cleared}L</span>` : ''}</div>`
+      ).join('');
+    }
+
+    function renderBlockList(blocks) {
+      document.getElementById('block-list').innerHTML =
+        blocks.map(b => `<div class="block-name" data-name="${b}" onclick="selectBlock('${b}')">${b}</div>`).join('');
+    }
+
+    function setStatus(msg, cls = '') {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = cls;
+    }
+
+    function clearPreview() {
+      previewCells = [];
+      previewValid = false;
+      renderGrid();
+    }
+
+    // ── State fetch ───────────────────────────────────────────────────────────
+
+    async function fetchState() {
+      const data = await fetch('/api/state').then(r => r.json());
+      currentGrid = data.grid;
+      renderGrid();
+      renderHistory(data.history);
+      renderBlockList(data.blocks);
+    }
+
+    // ── Block selection (catalog click) ───────────────────────────────────────
+
+    function selectBlock(name) {
+      selectedBlock = selectedBlock === name ? null : name;
+      document.querySelectorAll('.block-name').forEach(el =>
+        el.classList.toggle('selected', el.dataset.name === selectedBlock)
+      );
+      const gridEl = document.getElementById('grid');
+      gridEl.classList.toggle('pick-mode', !!selectedBlock);
+      if (selectedBlock) {
+        setStatus(`${selectedBlock} — hover the grid and click to place`, 'ok');
+      } else {
+        hoveredCell = null;
+        clearPreview();
+        setStatus('');
+      }
+    }
+
+    // ── Preview ───────────────────────────────────────────────────────────────
+
+    // Fetch preview from server and update previewCells/previewValid.
+    // Returns true if the fetch succeeded (block name was valid).
+    async function fetchPreview(block, row, col) {
+      const res = await fetch(`/api/preview?block=${block}&row=${row}&col=${col}`);
+      if (!res.ok) return false;
+      const data = await res.json();
+      previewCells = data.cells;
+      previewValid = data.valid;
+      renderGrid();
+      return true;
+    }
+
+    // Called when the text input changes. Typing also deselects any catalog block.
+    function onInput() {
+      if (selectedBlock) {
+        selectedBlock = null;
+        hoveredCell = null;
+        document.querySelectorAll('.block-name').forEach(el => el.classList.remove('selected'));
+        document.getElementById('grid').classList.remove('pick-mode');
+      }
+      clearTimeout(debounceTimer);
+      const parsed = parseInput(document.getElementById('block-input').value);
+      if (!parsed) {
+        clearPreview();
+        document.getElementById('place-btn').disabled = true;
+        document.getElementById('block-input').className = '';
+        setStatus('');
+        return;
+      }
+      debounceTimer = setTimeout(() => doTextPreview(parsed), 100);
+    }
+
+    async function doTextPreview(parsed) {
+      const res = await fetch(`/api/preview?block=${parsed.block}&row=${parsed.row}&col=${parsed.col}`);
+      if (!res.ok) {
+        const err = await res.json();
+        clearPreview();
+        document.getElementById('place-btn').disabled = true;
+        document.getElementById('block-input').className = 'invalid';
+        setStatus(err.detail, 'err');
+        return;
+      }
+      const data = await res.json();
+      previewCells = data.cells;
+      previewValid = data.valid;
+      renderGrid();
+      document.getElementById('place-btn').disabled = !data.valid;
+      document.getElementById('block-input').className = data.valid ? 'valid' : 'invalid';
+      setStatus(data.valid ? 'Ready — press Enter to place' : 'Cannot place here', data.valid ? 'ok' : 'err');
+    }
+
+    // ── Placement ─────────────────────────────────────────────────────────────
+
+    // Shared POST logic; returns true on success.
+    async function commitPlace(block, row, col) {
+      const res = await fetch('/api/place', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({block, row, col}),
+      });
+      if (!res.ok) { setStatus((await res.json()).detail, 'err'); return false; }
+      const data = await res.json();
+      currentGrid = data.grid;
+      previewCells = [];
+      previewValid = false;
+      renderGrid();
+
+      // Duplicates the full-line detection in grid.py's clear_full_lines(), but the server
+      // can't communicate which lines will clear until after /api/clear is called — too late
+      // for animation. Acceptable given the fixed 8x8 scale and simplicity of the check.
+      const fullRows = new Set();
+      const fullCols = new Set();
+      for (let r = 0; r < SIZE; r++) {
+        if (currentGrid[r].every(v => v === 1)) fullRows.add(r);
+      }
+      for (let c = 0; c < SIZE; c++) {
+        if (currentGrid.every(row => row[c] === 1)) fullCols.add(c);
+      }
+
+      if (fullRows.size || fullCols.size) {
+        isAnimating = true;
+        document.querySelectorAll('.cell').forEach(cell => {
+          if (fullRows.has(+cell.dataset.r) || fullCols.has(+cell.dataset.c))
+            cell.classList.add('clearing');
+        });
+        await new Promise(resolve => setTimeout(resolve, 500));
+        isAnimating = false;
+      }
+
+      const clearRes = await fetch('/api/clear', { method: 'POST' });
+      const clearData = await clearRes.json();
+      currentGrid = clearData.grid;
+      renderGrid();
+      renderHistory(clearData.history);
+      const lines = clearData.lines_cleared;
+      setStatus(lines ? `Placed! ${lines} line${lines > 1 ? 's' : ''} cleared` : 'Placed!', 'ok');
+      return true;
+    }
+
+    // Text-input path: place then clear the input.
+    async function doPlaceFromInput() {
+      if (isAnimating) return;
+      const parsed = parseInput(document.getElementById('block-input').value);
+      if (!parsed) return;
+      const ok = await commitPlace(parsed.block, parsed.row, parsed.col);
+      if (ok) {
+        previewCells = [];
+        previewValid = false;
+        document.getElementById('block-input').value = '';
+        document.getElementById('block-input').className = '';
+        document.getElementById('place-btn').disabled = true;
+        renderGrid();
+      }
+    }
+
+    // Grid-click path: place then refresh preview at the same cell.
+    async function doPlaceFromClick(r, c) {
+      const ok = await commitPlace(selectedBlock, r, c);
+      if (ok) {
+        // Refresh preview at the same position so the next placement is visible immediately.
+        const valid = await fetchPreview(selectedBlock, r, c);
+        if (!valid) clearPreview();
+      }
+    }
+
+    // ── Grid mouse events ─────────────────────────────────────────────────────
+
+    const gridEl = document.getElementById('grid');
+
+    gridEl.addEventListener('mouseover', async e => {
+      if (!selectedBlock || isAnimating) return;
+      const cell = e.target.closest('.cell');
+      if (!cell) return;
+      const r = +cell.dataset.r, c = +cell.dataset.c;
+      if (hoveredCell?.r === r && hoveredCell?.c === c) return;
+      hoveredCell = {r, c};
+      await fetchPreview(selectedBlock, r, c);
+    });
+
+    gridEl.addEventListener('mouseleave', () => {
+      if (!hoveredCell) return;
+      hoveredCell = null;
+      if (!isAnimating) clearPreview();
+    });
+
+    gridEl.addEventListener('click', async e => {
+      if (!selectedBlock || isAnimating) return;
+      const cell = e.target.closest('.cell');
+      if (!cell || !previewValid) return;
+      await doPlaceFromClick(+cell.dataset.r, +cell.dataset.c);
+    });
+
+    // ── Text input events ─────────────────────────────────────────────────────
+
+    function parseInput(val) {
+      const m = val.trim().match(/^([A-Z0-9_]+)\s*,?\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)$/i);
+      if (!m) return null;
+      return {block: m[1].toUpperCase(), row: +m[2], col: +m[3]};
+    }
+
+    document.getElementById('block-input').addEventListener('input', onInput);
+    document.getElementById('block-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !document.getElementById('place-btn').disabled) doPlaceFromInput();
+    });
+    document.getElementById('place-btn').addEventListener('click', doPlaceFromInput);
+
+    // ── Reset ─────────────────────────────────────────────────────────────────
+
+    document.getElementById('reset-btn').addEventListener('click', async () => {
+      await fetch('/api/reset', {method: 'POST'});
+      currentGrid = Array.from({length: SIZE}, () => Array(SIZE).fill(0));
+      selectedBlock = null;
+      hoveredCell = null;
+      document.querySelectorAll('.block-name').forEach(el => el.classList.remove('selected'));
+      gridEl.classList.remove('pick-mode');
+      clearPreview();
+      document.getElementById('block-input').value = '';
+      document.getElementById('block-input').className = '';
+      document.getElementById('place-btn').disabled = true;
+      renderHistory([]);
+      setStatus('Grid reset', '');
+    });
+
+    fetchState();
+  </script>
+</body>
+</html>
