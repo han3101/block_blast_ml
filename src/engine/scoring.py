@@ -27,3 +27,5 @@ class SimpleScorer:
 
     def reset(self) -> None:
         self._score = 0
+
+# TODO: add combo bonuses, etc.
