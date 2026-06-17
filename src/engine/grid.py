@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from typing import Iterator
+
 from engine.block import Block
 
 
 class Grid:
-    """Fixed-size 0/1 8x8 grid with Block Blast-style placement and line clearing."""
-    """Grid is customizable in size but has to be a square and is 8x8 by default."""
+    """An 8×8 (or custom square) 0/1 grid for Block Blast-style play."""
 
     def __init__(self, size: int = 8, cells: list[list[int]] | None = None) -> None:
+        """Create a grid. Pass ``cells`` to initialise from an existing matrix."""
         if size <= 0:
             raise ValueError("grid size must be positive")
 
@@ -29,14 +31,17 @@ class Grid:
         return copied
 
     def in_bounds(self, row: int, col: int) -> bool:
+        """Return True if (row, col) is inside the grid."""
         return 0 <= row < self.size and 0 <= col < self.size
 
     def is_empty(self, row: int, col: int) -> bool:
+        """Return True if the cell at (row, col) is unoccupied."""
         if not self.in_bounds(row, col):
             raise IndexError(f"cell ({row}, {col}) is out of bounds")
         return self._cells[row][col] == 0
 
     def can_place(self, block: Block, row: int, col: int) -> bool:
+        """Return True if the block can be placed with its origin at (row, col)."""
         for row_offset, col_offset in block.cells:
             target_row = row + row_offset
             target_col = col + col_offset
@@ -47,6 +52,7 @@ class Grid:
         return True
 
     def place(self, block: Block, row: int, col: int) -> None:
+        """Fill the block's cells onto the grid. Raises ValueError if placement is illegal."""
         if not self.can_place(block, row, col):
             raise ValueError(f"cannot place block {block.name!r} at ({row}, {col})")
 
@@ -54,8 +60,8 @@ class Grid:
             self._cells[row + row_offset][col + col_offset] = 1
 
     def clear_full_lines(self) -> int:
-        # TODO - Optimization can be made by only scanning rows and columns that were affected by the placement of the block
-
+        """Clear any fully-filled rows and columns and return the total count cleared."""
+        # TODO: optimise by only scanning rows/cols touched by the last placement
         full_rows = {row for row in range(self.size) if all(self._cells[row])}
         full_cols = {
             col for col in range(self.size) if all(self._cells[row][col] for row in range(self.size))
@@ -71,7 +77,21 @@ class Grid:
 
         return len(full_rows) + len(full_cols)
 
+    ### Utility methods
+
+    def placements(self, block: Block) -> Iterator[tuple[int, int]]:
+        """Yield every (row, col) origin where the block legally fits on the current grid."""
+        for row in range(self.size):
+            for col in range(self.size):
+                if self.can_place(block, row, col):
+                    yield row, col
+
+    def can_place_anywhere(self, block: Block) -> bool:
+        """Return True if the block has at least one legal placement on the current grid."""
+        return any(True for _ in self.placements(block))
+
     def to_matrix(self) -> list[list[int]]:
+        """Return a deep copy of the internal cell matrix."""
         return [row.copy() for row in self._cells]
 
     def __str__(self) -> str:

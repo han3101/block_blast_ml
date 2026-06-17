@@ -18,9 +18,8 @@ def test_empty_grid_initializes_to_zeroes() -> None:
 def test_place_updates_expected_cells() -> None:
     grid = Grid()
 
-    cleared = grid.place(LEFT_T, 2, 3)
+    grid.place(LEFT_T, 2, 3)
 
-    assert cleared == 0
     assert grid.to_matrix()[2][3] == 1
     assert grid.to_matrix()[3][3] == 1
     assert grid.to_matrix()[3][4] == 1
@@ -48,7 +47,8 @@ def test_full_row_clears_after_place() -> None:
     cells[4] = [1, 1, 1, 1, 1, 1, 1, 0]
     grid = Grid(cells=cells)
 
-    cleared = grid.place(SINGLE, 4, 7)
+    grid.place(SINGLE, 4, 7)
+    cleared = grid.clear_full_lines()
 
     assert cleared == 1
     assert grid.to_matrix()[4] == [0 for _ in range(8)]
@@ -60,7 +60,8 @@ def test_full_column_clears_after_place() -> None:
         cells[row][2] = 1
     grid = Grid(cells=cells)
 
-    cleared = grid.place(SINGLE, 7, 2)
+    grid.place(SINGLE, 7, 2)
+    cleared = grid.clear_full_lines()
 
     assert cleared == 1
     assert [row[2] for row in grid.to_matrix()] == [0 for _ in range(8)]
@@ -75,7 +76,8 @@ def test_full_row_and_column_clear_together() -> None:
     cells[3][5] = 0
     grid = Grid(cells=cells)
 
-    cleared = grid.place(SINGLE, 3, 5)
+    grid.place(SINGLE, 3, 5)
+    cleared = grid.clear_full_lines()
 
     assert cleared == 2
     matrix = grid.to_matrix()
@@ -170,7 +172,8 @@ def test_multiple_full_rows_clear_simultaneously() -> None:
     cells[3] = [1, 1, 1, 1, 1, 1, 1, 0]
     grid = Grid(cells=cells)
 
-    cleared = grid.place(LINE_2_V, 2, 7)
+    grid.place(LINE_2_V, 2, 7)
+    cleared = grid.clear_full_lines()
 
     assert cleared == 2
     matrix = grid.to_matrix()
@@ -185,7 +188,8 @@ def test_multiple_full_columns_clear_simultaneously() -> None:
         cells[row][2] = 1
     grid = Grid(cells=cells)
 
-    cleared = grid.place(LINE_2_H, 7, 1)
+    grid.place(LINE_2_H, 7, 1)
+    cleared = grid.clear_full_lines()
 
     assert cleared == 2
     matrix = grid.to_matrix()
