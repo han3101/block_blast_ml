@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from engine.block import ALL_BLOCKS, Block
 from engine.generator import HandGenerator, Mode
 from engine.grid import Grid
-from engine.scoring import Scorer, SimpleScorer
+from engine.scoring import ComboScorer, Scorer, SimpleScorer
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +16,7 @@ class StepResult:
     game_over: bool
     hand_refreshed: bool
     prev_score: int = 0
+    combo: int = 0
 
 
 class GameState:
@@ -27,7 +28,7 @@ class GameState:
         scorer: Scorer | None = None,
     ) -> None:
         self._generator = HandGenerator(seed=seed, pool=pool, mode=mode)
-        self._scorer: Scorer = scorer if scorer is not None else SimpleScorer()
+        self._scorer: Scorer = scorer if scorer is not None else ComboScorer()
         self._grid = Grid()
         self._hand: list[Block | None] = []
         self.game_over: bool = False
@@ -85,10 +86,12 @@ class GameState:
         lines_cleared = self._grid.clear_full_lines()
         cells_placed = len(block.cells)
         self._scorer.score_placement(cells_placed, lines_cleared)
+        combo = getattr(self._scorer, "combo", 0)
         self._hand[slot] = None
 
         hand_refreshed = False
         if all(b is None for b in self._hand):
+            self._scorer.end_round()
             self._deal_hand()
             hand_refreshed = True
         else:
@@ -101,6 +104,7 @@ class GameState:
             game_over=self.game_over,
             hand_refreshed=hand_refreshed,
             prev_score=prev_score,
+            combo=combo,
         )
         return self.last_result
 
