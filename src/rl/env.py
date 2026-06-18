@@ -1,6 +1,8 @@
 """Gymnasium environment wrapping GameState for RL training."""
 from __future__ import annotations
 
+from copy import copy
+
 import numpy as np
 import gymnasium
 from gymnasium import spaces
@@ -88,3 +90,23 @@ class BlockBlastEnv(gymnasium.Env):
 
     def _mask(self) -> np.ndarray:
         return np.array(action_mask(self._state), dtype=bool)
+
+
+class AutoResetEnv(gymnasium.Wrapper):
+    """Auto-reset on termination, propagating the reset info's action_mask.
+
+    gymnasium 1.x removed auto-reset from vector envs and the built-in
+    Autoreset wrapper discards the reset info, leaving the terminal (all-False)
+    action_mask. This wrapper replaces it with the first obs of the new episode.
+    """
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        if terminated or truncated:
+            new_obs, new_info = self.env.reset()
+            info["final_observation"] = obs
+            info["final_info"] = copy(info)
+            if "action_mask" in new_info:
+                info["action_mask"] = new_info["action_mask"]
+            return new_obs, reward, terminated, truncated, info
+        return obs, reward, terminated, truncated, info

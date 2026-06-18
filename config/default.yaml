@@ -1,0 +1,36 @@
+# PPO hyperparameters
+total_timesteps: 2000000
+n_envs: 16
+rollout_steps: 128
+batch_size: 512
+n_epochs: 4
+gamma: 0.99
+gae_lambda: 0.95
+clip_coef: 0.2
+ent_coef: 0.01
+ent_coef_final: 0.001
+vf_coef: 0.5
+max_grad_norm: 0.5
+
+# Optimizer
+lr: 0.0003
+lr_warmup_frac: 0.05
+target_kl: 0.02
+
+# Reward shaping
+line_clear_bonus: 0.0
+game_over_penalty: 0.0
+
+# Environment
+env_mode: at_least_one
+seed: 42
+
+# Hardware (auto = detected at runtime)
+device: auto
+amp: false
+compile: false
+
+# Logging / checkpointing
+log_interval: 1
+checkpoint_interval: 100
+keep_checkpoints: 5
