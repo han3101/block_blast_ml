@@ -1,9 +1,12 @@
 """Shared PPO training loop: rollout buffer, update, logging, checkpointing."""
 from __future__ import annotations
 
+import sys
 import time
+from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
-from typing import Callable, cast
+from typing import Callable, Iterator, cast
 
 import gymnasium
 import numpy as np
@@ -11,11 +14,155 @@ import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
+from engine.generator import Mode
 from rl.config import TrainConfig
 from rl.encoding import NUM_ACTIONS
+from rl.env import BlockBlastEnv
 from rl.policy import BlockBlastPolicy
 
 _OBS_SHAPE = (4, 8, 8)
+
+
+class _Tee:
+    """Fan out writes to several streams (e.g. console + log file)."""
+
+    def __init__(self, *streams) -> None:
+        self._streams = streams
+
+    def write(self, data: str) -> int:
+        for s in self._streams:
+            s.write(data)
+        return len(data)
+
+    def flush(self) -> None:
+        for s in self._streams:
+            s.flush()
+
+
+@contextmanager
+def tee_stdout(path: Path) -> Iterator[None]:
+    """Mirror stdout/stderr to `path` (line-buffered, appended) for the duration.
+
+    Lets the existing print()-based progress logging double as a persistent
+    per-run log without changing any call sites. Tracebacks (stderr) are captured
+    too, so a crash leaves a record in the run directory.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(path, "a", buffering=1)
+    fh.write(f"\n===== run started {datetime.now():%Y-%m-%d %H:%M:%S} =====\n")
+    saved_out, saved_err = sys.stdout, sys.stderr
+    sys.stdout = _Tee(saved_out, fh)  # type: ignore[assignment]
+    sys.stderr = _Tee(saved_err, fh)  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        sys.stdout, sys.stderr = saved_out, saved_err
+        fh.close()
+
+
+# ---------------------------------------------------------------------------
+# Return normalization (SB3 VecNormalize-style reward scaling)
+# ---------------------------------------------------------------------------
+
+class RunningMeanStd:
+    """Welford running mean/variance over a stream of vectors (parallel update)."""
+
+    def __init__(self, shape: tuple[int, ...] = ()) -> None:
+        self.mean = np.zeros(shape, dtype=np.float64)
+        self.var = np.ones(shape, dtype=np.float64)
+        self.count = 1e-4
+
+    def update(self, x: np.ndarray) -> None:
+        batch_mean = x.mean(axis=0)
+        batch_var = x.var(axis=0)
+        batch_count = x.shape[0]
+        delta = batch_mean - self.mean
+        tot = self.count + batch_count
+        self.mean += delta * batch_count / tot
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        m2 = m_a + m_b + delta**2 * self.count * batch_count / tot
+        self.var = m2 / tot
+        self.count = tot
+
+
+class ReturnNormalizer:
+    """Scales rewards by the running std of the discounted return.
+
+    Keeps training targets O(1) so value loss doesn't dominate the shared trunk.
+    The *raw* reward is left untouched for episode-score logging; only the value
+    of `scale()` is what should go into the rollout buffer.
+    """
+
+    def __init__(self, n_envs: int, gamma: float, eps: float = 1e-8, clip: float = 10.0) -> None:
+        self.rms = RunningMeanStd(shape=())
+        self.ret = np.zeros(n_envs, dtype=np.float64)
+        self.gamma = gamma
+        self.eps = eps
+        self.clip = clip
+
+    def scale(self, reward: np.ndarray, done: np.ndarray) -> np.ndarray:
+        self.ret = self.ret * self.gamma + reward
+        self.rms.update(self.ret)
+        scaled = reward / np.sqrt(self.rms.var + self.eps)
+        self.ret[done.astype(bool)] = 0.0
+        return np.clip(scaled, -self.clip, self.clip).astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
+# Deterministic eval vs the greedy baseline (raw game score, fixed seeds)
+# ---------------------------------------------------------------------------
+
+@torch.no_grad()
+def evaluate(
+    policy: BlockBlastPolicy,
+    device: torch.device,
+    n_episodes: int,
+    seed_offset: int,
+    mode: Mode,
+) -> dict[str, float]:
+    """Play `n_episodes` fixed-seed games with argmax actions and no reward shaping.
+
+    Returns true-game-score stats (directly comparable to the greedy baseline).
+    Batches the policy forward over still-active games for speed.
+    """
+    was_training = policy.training
+    policy.eval()
+
+    envs = [BlockBlastEnv(seed=seed_offset + i, mode=mode) for i in range(n_episodes)]
+    obs: list[np.ndarray | None] = [None] * n_episodes
+    masks: list[np.ndarray | None] = [None] * n_episodes
+    scores = np.zeros(n_episodes, dtype=np.float64)
+    lengths = np.zeros(n_episodes, dtype=np.int64)
+    done = np.zeros(n_episodes, dtype=bool)
+
+    for i, env in enumerate(envs):
+        o, info = env.reset(seed=seed_offset + i)
+        obs[i], masks[i] = o, info["action_mask"]
+
+    while not done.all():
+        active = np.where(~done)[0]
+        obs_b = torch.from_numpy(np.stack([obs[i] for i in active])).to(device)
+        mask_b = torch.from_numpy(np.stack([masks[i] for i in active])).to(device)
+        logits, _ = policy(obs_b)
+        logits = logits.masked_fill(~mask_b, float("-inf"))
+        actions = logits.argmax(dim=-1).cpu().numpy()
+        for k, i in enumerate(active):
+            o, rew, term, trunc, info = envs[i].step(int(actions[k]))
+            scores[i] += rew  # no shaping → reward == score delta
+            lengths[i] += 1
+            obs[i], masks[i] = o, info["action_mask"]
+            if term or trunc:
+                done[i] = True
+
+    if was_training:
+        policy.train()
+    return {
+        "score_mean": float(scores.mean()),
+        "score_median": float(np.median(scores)),
+        "score_max": float(scores.max()),
+        "length_mean": float(lengths.mean()),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +324,7 @@ def train(
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     global_step = 0
-    best_mean_reward = -float("inf")
+    best_eval_score = -float("inf")
     if resume_from:
         global_step = load_checkpoint(resume_from, policy, optimizer)
         print(f"resumed from {resume_from} at step {global_step:,}")
@@ -186,6 +333,7 @@ def train(
     mask_np = _extract_masks(infos, cfg.n_envs)
 
     buf = RolloutBuffer(cfg.rollout_steps, cfg.n_envs)
+    ret_norm = ReturnNormalizer(cfg.n_envs, cfg.gamma) if cfg.normalize_returns else None
 
     ep_rewards: list[float] = []
     ep_lengths: list[int] = []
@@ -218,9 +366,12 @@ def train(
             mask_next = _extract_masks(infos_next, cfg.n_envs)
             done_np = (term_np | trunc_np).astype(np.float32)
 
+            # Store the normalized reward for training, keep raw for score logging.
+            rew_buf = ret_norm.scale(rew_np, done_np) if ret_norm is not None else rew_np
+
             buf.obs[t]       = obs_np
             buf.actions[t]   = action_np
-            buf.rewards[t]   = rew_np
+            buf.rewards[t]   = rew_buf
             buf.dones[t]     = done_np
             buf.values[t]    = value_t.cpu().numpy()
             buf.log_probs[t] = log_prob_t.cpu().numpy()
@@ -244,6 +395,12 @@ def train(
                 torch.from_numpy(mask_np).to(device),
             )
         buf.compute_gae(last_val.cpu().numpy(), cfg.gamma, cfg.gae_lambda)
+
+        # critic fit quality (scale-invariant); the value head is Phase 3's leaf evaluator
+        y_true = buf.returns.reshape(-1)
+        y_pred = buf.values.reshape(-1)
+        var_y = float(np.var(y_true))
+        explained_var = float("nan") if var_y == 0 else 1.0 - float(np.var(y_true - y_pred)) / var_y
 
         # ---- PPO update ----
         policy.train()
@@ -320,17 +477,13 @@ def train(
             mean_clip = float(np.mean(clip_fracs))
             total_loss = mean_pg + cfg.vf_coef * mean_vf - ent_coef * mean_ent
 
-            if mean_rew > best_mean_reward:
-                best_mean_reward = mean_rew
-                save_best(run_dir, policy, mean_rew)
-
             writer.add_scalar("train/avg_score",        mean_rew,   global_step)
             writer.add_scalar("train/max_score",        max_rew,    global_step)
-            writer.add_scalar("train/best_score",       best_mean_reward, global_step)
             writer.add_scalar("train/avg_length",       mean_len,   global_step)
             writer.add_scalar("train/policy_loss",      mean_pg,    global_step)
             writer.add_scalar("train/value_loss",       mean_vf,    global_step)
             writer.add_scalar("train/entropy",          mean_ent,   global_step)
+            writer.add_scalar("train/explained_variance", explained_var, global_step)
             writer.add_scalar("train/total_loss",       total_loss, global_step)
             writer.add_scalar("train/approx_kl",        mean_kl,    global_step)
             writer.add_scalar("train/clip_fraction",    mean_clip,  global_step)
@@ -343,14 +496,31 @@ def train(
                 f"  fps:            {sps:.0f}\n"
                 f"  avg_score:      {mean_rew:.4f}\n"
                 f"  max_score:      {max_rew:.0f}\n"
-                f"  best_score:     {best_mean_reward:.4f}\n"
                 f"  avg_length:     {mean_len:.4f}\n"
                 f"  policy_loss:    {mean_pg:.4f}\n"
                 f"  value_loss:     {mean_vf:.4f}\n"
                 f"  entropy:        {mean_ent:.4f}\n"
+                f"  explained_var:  {explained_var:.4f}\n"
                 f"  total_loss:     {total_loss:.4f}\n"
                 f"  approx_kl:      {mean_kl:.4f}\n"
                 f"  clip_fraction:  {mean_clip:.4f}\n"
+            )
+
+        # ---- deterministic eval vs the greedy baseline (raw game score) ----
+        if rollout_idx % cfg.eval_interval == 0:
+            ev = evaluate(policy, device, cfg.eval_episodes, cfg.eval_seed_offset, cfg.env_mode)
+            writer.add_scalar("eval/score_mean",   ev["score_mean"],   global_step)
+            writer.add_scalar("eval/score_median", ev["score_median"], global_step)
+            writer.add_scalar("eval/score_max",    ev["score_max"],    global_step)
+            writer.add_scalar("eval/length_mean",  ev["length_mean"],  global_step)
+            if ev["score_mean"] > best_eval_score:
+                best_eval_score = ev["score_mean"]
+                save_best(run_dir, policy, best_eval_score)
+            writer.add_scalar("eval/best_score_mean", best_eval_score, global_step)
+            print(
+                f"[eval @ {global_step:,}] score_mean={ev['score_mean']:.1f} "
+                f"median={ev['score_median']:.1f} max={ev['score_max']:.0f} "
+                f"len={ev['length_mean']:.1f}  (best={best_eval_score:.1f}, greedy=242.7)"
             )
 
         # ---- checkpoint ----

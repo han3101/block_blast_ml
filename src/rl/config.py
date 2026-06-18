@@ -12,6 +12,8 @@ from typing import Any
 
 import yaml
 
+from engine.generator import Mode
+
 
 @dataclass(frozen=True)
 class TrainConfig:
@@ -21,13 +23,14 @@ class TrainConfig:
     rollout_steps: int = 128
     batch_size: int = 512
     n_epochs: int = 4
-    gamma: float = 0.99
+    gamma: float = 0.997
     gae_lambda: float = 0.95
     clip_coef: float = 0.2
-    ent_coef: float = 0.01
-    ent_coef_final: float = 0.001
+    ent_coef: float = 0.03
+    ent_coef_final: float = 0.005
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
+    normalize_returns: bool = True
     # Optimizer
     lr: float = 3e-4
     lr_warmup_frac: float = 0.05
@@ -36,8 +39,13 @@ class TrainConfig:
     line_clear_bonus: float = 0.0
     game_over_penalty: float = 0.0
     # Environment
-    env_mode: str = "at_least_one"
+    env_mode: Mode = "at_least_one"
+    vec_env: str = "sync"            # "sync" (1 process) or "async" (subprocess per core)
     seed: int = 42
+    # Eval (deterministic, fixed-seed, vs greedy baseline)
+    eval_interval: int = 50          # rollouts between evals
+    eval_episodes: int = 64          # fixed-seed games per eval
+    eval_seed_offset: int = 0        # seeds 0..N-1 → comparable to greedy baseline
     # Hardware
     device: str = "auto"
     amp: bool = False
