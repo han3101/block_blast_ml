@@ -15,6 +15,7 @@ class StepResult:
     cells_placed: int
     game_over: bool
     hand_refreshed: bool
+    prev_score: int = 0
 
 
 class GameState:
@@ -75,6 +76,10 @@ class GameState:
             raise ValueError(f"slot {slot} is already empty")
         if not self._grid.can_place(block, row, col):
             raise ValueError(f"cannot place {block.name!r} at ({row}, {col})")
+        if self._scorer.score is not None:
+            prev_score = self._scorer.score
+        else:
+            prev_score = 0
 
         self._grid.place(block, row, col)
         lines_cleared = self._grid.clear_full_lines()
@@ -95,6 +100,7 @@ class GameState:
             cells_placed=cells_placed,
             game_over=self.game_over,
             hand_refreshed=hand_refreshed,
+            prev_score=prev_score,
         )
         return self.last_result
 

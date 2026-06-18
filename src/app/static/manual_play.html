@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Block Blast — Manual Play</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Courier New', monospace;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 28px 32px;
+      user-select: none;
+    }
+    h1 {
+      font-size: 1.1rem;
+      letter-spacing: 3px;
+      color: #7dd3fc;
+      margin-bottom: 24px;
+    }
+    .layout {
+      display: flex;
+      gap: 28px;
+      align-items: flex-start;
+    }
+    .left-panel { display: flex; flex-direction: column; gap: 16px; }
+
+    /* grid */
+    .grid-wrap { display: flex; gap: 4px; }
+    .axis-col {
+      display: flex; flex-direction: column; gap: 3px; padding-top: 22px;
+    }
+    .axis-cell {
+      width: 18px; height: 50px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; color: #475569;
+    }
+    .grid-col { display: flex; flex-direction: column; gap: 3px; }
+    .axis-row { display: flex; gap: 3px; margin-bottom: 3px; }
+    .axis-row-cell {
+      width: 50px; height: 18px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; color: #475569;
+    }
+    .grid-container {
+      display: grid;
+      grid-template-columns: repeat(8, 50px);
+      gap: 3px;
+    }
+    .cell {
+      width: 50px; height: 50px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 4px;
+      transition: background 0.06s, border-color 0.06s;
+    }
+    /* !important needed because filled cells carry inline background/borderColor styles (set by
+       renderGrid() to preserve slot colours). Inline styles beat class rules, so without it
+       preview highlights are invisible on occupied cells. Cleaner fix: drop class-based colours
+       entirely and drive everything through inline styles — but that's a bigger renderGrid rewrite. */
+    .cell.p-valid   { background: #93c5fd !important; border-color: #60a5fa !important; }
+    .cell.p-invalid { background: #ef4444 !important; border-color: #dc2626 !important; opacity: 0.7; }
+    @keyframes flash-clear {
+      0%, 100% { background: #2563eb; border-color: #1d4ed8; }
+      50%       { background: #fbbf24; border-color: #f59e0b; }
+    }
+    .cell.clearing { animation: flash-clear 0.5s ease-in-out; }
+
+    /* drag ghost */
+    #drag-ghost {
+      position: fixed;
+      pointer-events: none;
+      z-index: 1000;
+      opacity: 0.88;
+      filter: drop-shadow(0 6px 18px rgba(0,0,0,0.6));
+    }
+
+    /* right panel */
+    .right-panel { display: flex; flex-direction: column; gap: 16px; width: 260px; }
+    .panel {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 8px; padding: 14px;
+    }
+    .panel h3 {
+      font-size: 0.65rem; letter-spacing: 2px; color: #475569;
+      text-transform: uppercase; margin-bottom: 10px;
+    }
+
+    /* score */
+    .score-row { display: flex; align-items: baseline; gap: 10px; }
+    .score-label { font-size: 0.65rem; letter-spacing: 2px; color: #475569; text-transform: uppercase; }
+    .score-value { font-size: 1.6rem; font-weight: bold; color: #fbbf24; letter-spacing: 2px; }
+
+    /* hand tray */
+    .hand-tray { display: flex; gap: 8px; }
+    .slot-card {
+      flex: 1; min-width: 0;
+      background: #0f172a;
+      border: 2px solid #334155;
+      border-radius: 8px;
+      padding: 10px 6px 8px;
+      cursor: grab;
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      transition: border-color 0.12s, opacity 0.12s;
+      min-height: 90px;
+    }
+    .slot-card:hover:not(.empty) { border-color: #475569; }
+    .slot-card.empty { opacity: 0.25; cursor: default; }
+    .slot-card.dragging-from { opacity: 0.3; cursor: grabbing; }
+    .slot-badge { font-size: 0.6rem; color: #475569; letter-spacing: 1px; align-self: flex-start; }
+    .slot-shape { display: flex; align-items: center; justify-content: center; flex: 1; min-height: 40px; }
+    .slot-name {
+      font-size: 0.55rem; color: #475569; text-align: center;
+      letter-spacing: 0.5px; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; max-width: 100%;
+    }
+
+    /* status */
+    #status { font-size: 0.78rem; min-height: 1.1em; color: #64748b; }
+    #status.ok  { color: #22c55e; }
+    #status.err { color: #ef4444; }
+
+    /* buttons */
+    button {
+      padding: 10px 16px; border: none; border-radius: 6px;
+      font-family: inherit; font-size: 0.8rem; font-weight: bold;
+      cursor: pointer; letter-spacing: 1px;
+    }
+    button:hover { opacity: 0.85; }
+    #reset-btn { background: #1e293b; color: #94a3b8; border: 1px solid #334155; width: 100%; }
+
+    /* history */
+    .history-list {
+      display: flex; flex-direction: column; gap: 5px;
+      max-height: 200px; overflow-y: auto;
+    }
+    .h-item {
+      font-size: 0.72rem; color: #94a3b8;
+      padding: 4px 6px; border-left: 2px solid #334155;
+    }
+    .h-item .hname  { color: #7dd3fc; }
+    .h-item .hlines { color: #86efac; }
+    .h-item .hscore { color: #fbbf24; }
+    .empty-note { font-size: 0.72rem; color: #475569; padding: 4px 0; }
+
+    /* game over overlay */
+    #gameover-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.75);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    #gameover-overlay.hidden { display: none; }
+    .gameover-box {
+      background: #1e293b; border: 1px solid #475569;
+      border-radius: 12px; padding: 40px 56px;
+      text-align: center; display: flex; flex-direction: column; gap: 16px;
+    }
+    .gameover-title { font-size: 1.4rem; letter-spacing: 6px; color: #ef4444; }
+    .gameover-score { font-size: 1rem; color: #fbbf24; letter-spacing: 3px; }
+    #gameover-reset-btn { background: #2563eb; color: #fff; padding: 12px 28px; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>BLOCK BLAST — MANUAL PLAY</h1>
+
+  <div class="layout">
+    <div class="left-panel">
+      <div class="grid-wrap">
+        <div class="axis-col" id="row-labels"></div>
+        <div class="grid-col">
+          <div class="axis-row" id="col-labels"></div>
+          <div class="grid-container" id="grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="right-panel">
+      <div class="panel">
+        <div class="score-row">
+          <span class="score-label">SCORE</span>
+          <span class="score-value" id="score">0</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Hand — drag to place</h3>
+        <div class="hand-tray" id="hand-tray"></div>
+      </div>
+
+      <div id="status"></div>
+
+      <button id="reset-btn">RESET</button>
+
+      <div class="panel">
+        <h3>History</h3>
+        <div class="history-list" id="history"><span class="empty-note">No placements yet</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="gameover-overlay" class="hidden">
+    <div class="gameover-box">
+      <div class="gameover-title">GAME OVER</div>
+      <div class="gameover-score" id="gameover-score"></div>
+      <button id="gameover-reset-btn">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <script>
+    const SIZE = 8;
+    const CELL_STRIDE = 53;      // 50px cell + 3px gap
+    const GHOST_CELL_PX = 36;    // ghost block cell size
+    const GHOST_GAP = 2;
+
+    const SLOT_COLORS      = ['#3b82f6', '#a855f7', '#f59e0b'];
+    const SLOT_COLORS_DARK = ['#1d4ed8', '#7c3aed', '#b45309'];
+    const SLOT_LABELS      = ['1', '2', '3'];
+
+    let state       = null;    // { grid, hand, hand_shapes, score, game_over, history }
+    let cellSlots   = Array.from({length: SIZE}, () => Array(SIZE).fill(null)); // null | 0 | 1 | 2
+    let dragging    = null;    // { slot, ghostEl, ghostW, ghostH } | null
+    let lastHovered = null;    // { r, c } | null
+    let previewCells = [];
+    let previewValid = false;
+    let previewSeq  = 0;
+    let isAnimating = false;
+
+    // ── DOM construction ──────────────────────────────────────────────────────
+
+    (function buildDOM() {
+      const colLabels = document.getElementById('col-labels');
+      for (let c = 0; c < SIZE; c++) {
+        const d = document.createElement('div');
+        d.className = 'axis-row-cell';
+        d.textContent = c;
+        colLabels.appendChild(d);
+      }
+      const rowLabels = document.getElementById('row-labels');
+      for (let r = 0; r < SIZE; r++) {
+        const d = document.createElement('div');
+        d.className = 'axis-cell';
+        d.textContent = r;
+        rowLabels.appendChild(d);
+      }
+      const grid = document.getElementById('grid');
+      for (let r = 0; r < SIZE; r++) {
+        for (let c = 0; c < SIZE; c++) {
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          cell.dataset.r = r;
+          cell.dataset.c = c;
+          grid.appendChild(cell);
+        }
+      }
+    })();
+
+    // ── Mini block shape renderer ─────────────────────────────────────────────
+
+    function miniBlock(cells, color, cellPx = 13) {
+      if (!cells || !cells.length) return '<span style="color:#475569;font-size:1.2rem;">—</span>';
+      const maxR = Math.max(...cells.map(([r]) => r));
+      const maxC = Math.max(...cells.map(([, c]) => c));
+      const cellSet = new Set(cells.map(([r, c]) => `${r},${c}`));
+      let html = `<div style="display:grid;grid-template-columns:repeat(${maxC+1},${cellPx}px);gap:2px;">`;
+      for (let r = 0; r <= maxR; r++) {
+        for (let c = 0; c <= maxC; c++) {
+          const bg = cellSet.has(`${r},${c}`) ? color : 'transparent';
+          html += `<div style="width:${cellPx}px;height:${cellPx}px;background:${bg};border-radius:2px;"></div>`;
+        }
+      }
+      return html + '</div>';
+    }
+
+    // ── Rendering ─────────────────────────────────────────────────────────────
+
+    function renderGrid() {
+      const previewSet = new Set(previewCells.map(([r, c]) => `${r},${c}`));
+      document.querySelectorAll('#grid .cell').forEach(cell => {
+        const r = +cell.dataset.r, c = +cell.dataset.c;
+        cell.className = 'cell';
+        cell.style.background  = '';
+        cell.style.borderColor = '';
+
+        if (previewSet.has(`${r},${c}`)) {
+          cell.classList.add(previewValid ? 'p-valid' : 'p-invalid');
+        } else if (cellSlots[r][c] !== null) {
+          const s = cellSlots[r][c];
+          cell.style.background  = SLOT_COLORS[s];
+          cell.style.borderColor = SLOT_COLORS_DARK[s];
+        } else if (state.grid[r]?.[c]) {
+          cell.classList.add('filled');
+        }
+      });
+    }
+
+    function renderHand() {
+      const tray = document.getElementById('hand-tray');
+      tray.innerHTML = '';
+      for (let i = 0; i < 3; i++) {
+        const block = state.hand[i];
+        const shape = state.hand_shapes[i];
+        const card  = document.createElement('div');
+        card.className = 'slot-card' + (block === null ? ' empty' : '');
+        card.dataset.slot = i;
+
+        const badge   = document.createElement('div');
+        badge.className = 'slot-badge';
+        badge.textContent = `SLOT ${SLOT_LABELS[i]}`;
+
+        const shapeDiv = document.createElement('div');
+        shapeDiv.className = 'slot-shape';
+        shapeDiv.innerHTML = miniBlock(shape, SLOT_COLORS[i]);
+
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'slot-name';
+        nameDiv.textContent = block ? block.toUpperCase() : 'USED';
+
+        card.append(badge, shapeDiv, nameDiv);
+
+        if (block !== null) {
+          card.addEventListener('mousedown', e => { e.preventDefault(); startDrag(e, i); });
+          card.addEventListener('touchstart', e => startDrag(e, i), {passive: false});
+        }
+        tray.appendChild(card);
+      }
+    }
+
+    function renderScore(score) {
+      document.getElementById('score').textContent = score;
+    }
+
+    function renderHistory(history) {
+      const el = document.getElementById('history');
+      if (!history || !history.length) {
+        el.innerHTML = '<span class="empty-note">No placements yet</span>';
+        return;
+      }
+      el.innerHTML = [...history].reverse().map(h => {
+        const lines  = h.lines_cleared ? ` <span class="hlines">+${h.lines_cleared}L</span>` : '';
+        const score  = h.score !== undefined ? ` <span class="hscore">${h.score}pts</span>` : '';
+        return `<div class="h-item"><span class="hname">${(h.block || '?').toUpperCase()}</span> @ (${h.row},${h.col})${lines}${score}</div>`;
+      }).join('');
+    }
+
+    function setStatus(msg, cls = '') {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = cls;
+    }
+
+    function showGameOver(score) {
+      document.getElementById('gameover-score').textContent = `FINAL SCORE: ${score}`;
+      document.getElementById('gameover-overlay').classList.remove('hidden');
+    }
+
+    // ── State fetch ───────────────────────────────────────────────────────────
+
+    async function fetchState() {
+      const data = await fetch('/api/play/state').then(r => r.json());
+      state = data;
+      renderGrid();
+      renderHand();
+      renderScore(data.score);
+      renderHistory(data.history);
+      if (data.game_over) showGameOver(data.score);
+    }
+
+    // ── Drag ──────────────────────────────────────────────────────────────────
+
+    function ghostSize(shape) {
+      const maxR = Math.max(...shape.map(([r]) => r));
+      const maxC = Math.max(...shape.map(([, c]) => c));
+      return {
+        w: (maxC + 1) * GHOST_CELL_PX + maxC * GHOST_GAP,
+        h: (maxR + 1) * GHOST_CELL_PX + maxR * GHOST_GAP,
+      };
+    }
+
+    function startDrag(e, slot) {
+      if (!state || state.hand[slot] === null || isAnimating) return;
+      const isTouch = e.type === 'touchstart';
+      if (isTouch) e.preventDefault();
+
+      const shape = state.hand_shapes[slot];
+      const {w, h} = ghostSize(shape);
+
+      const ghost = document.createElement('div');
+      ghost.id = 'drag-ghost';
+      ghost.innerHTML = miniBlock(shape, SLOT_COLORS[slot], GHOST_CELL_PX);
+      document.body.appendChild(ghost);
+
+      document.querySelector(`.slot-card[data-slot="${slot}"]`)?.classList.add('dragging-from');
+      dragging = {slot, ghostEl: ghost, ghostW: w, ghostH: h};
+
+      const {clientX, clientY} = isTouch ? e.touches[0] : e;
+      moveGhost(clientX, clientY);
+    }
+
+    function moveGhost(x, y) {
+      const {ghostEl, ghostW, ghostH} = dragging;
+      // Center horizontally on cursor, float above it
+      ghostEl.style.left = (x - ghostW / 2) + 'px';
+      ghostEl.style.top  = (y - ghostH - 18) + 'px';
+    }
+
+    function getGridCell(x, y) {
+      const rect = document.getElementById('grid').getBoundingClientRect();
+      const relX = x - rect.left, relY = y - rect.top;
+      if (relX < 0 || relY < 0 || relX > rect.width || relY > rect.height) return null;
+      const col = Math.floor(relX / CELL_STRIDE);
+      const row = Math.floor(relY / CELL_STRIDE);
+      if (col >= SIZE || row >= SIZE) return null;
+      return {r: row, c: col};
+    }
+
+    async function onMove(x, y) {
+      if (!dragging || isAnimating) return;
+      moveGhost(x, y);
+
+      const cell = getGridCell(x, y);
+      if (!cell) {
+        if (lastHovered) { lastHovered = null; previewCells = []; previewValid = false; renderGrid(); }
+        return;
+      }
+      const {r, c} = cell;
+      if (lastHovered?.r === r && lastHovered?.c === c) return;
+      lastHovered = {r, c};
+
+      const seq = ++previewSeq;
+      const res = await fetch(`/api/play/preview?slot=${dragging.slot}&row=${r}&col=${c}`);
+      if (seq !== previewSeq || !res.ok) return;
+      const data = await res.json();
+      previewCells = data.cells;
+      previewValid = data.valid;
+      renderGrid();
+    }
+
+    async function onDrop(x, y) {
+      if (!dragging) return;
+      const slot = dragging.slot;
+      dragging.ghostEl.remove();
+      document.querySelector(`.slot-card[data-slot="${slot}"]`)?.classList.remove('dragging-from');
+      dragging = null;
+
+      const cell = getGridCell(x, y);
+      if (!cell || !previewValid) {
+        lastHovered = null; previewCells = []; previewValid = false; renderGrid();
+        return;
+      }
+      await doPlace(slot, cell.r, cell.c);
+    }
+
+    // ── Placement ─────────────────────────────────────────────────────────────
+
+    async function doPlace(slot, row, col) {
+      isAnimating = true;
+
+      const shape    = state.hand_shapes[slot];
+      const animGrid = state.grid.map(r => [...r]);
+
+      for (const [dr, dc] of shape) {
+        const ar = row + dr, ac = col + dc;
+        if (ar >= 0 && ar < SIZE && ac >= 0 && ac < SIZE) {
+          animGrid[ar][ac] = 1;
+          cellSlots[ar][ac] = slot;
+        }
+      }
+
+      const clearRows = new Set(), clearCols = new Set();
+      for (let r = 0; r < SIZE; r++) {
+        if (animGrid[r].every(v => v === 1)) clearRows.add(r);
+      }
+      for (let c = 0; c < SIZE; c++) {
+        if (animGrid.every(row => row[c] === 1)) clearCols.add(c);
+      }
+
+      // POST runs concurrently with the animation
+      const placeProm = fetch('/api/play/place', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({slot, row, col}),
+      }).then(r => r.json());
+
+      // Show the placed block on the board before the server responds
+      const savedGrid = state.grid;
+      state.grid      = animGrid;
+      previewCells    = [];
+      previewValid    = false;
+      renderGrid();
+
+      if (clearRows.size || clearCols.size) {
+        // Strip inline styles so the CSS @keyframes animation can apply
+        document.querySelectorAll('#grid .cell').forEach(cell => {
+          if (clearRows.has(+cell.dataset.r) || clearCols.has(+cell.dataset.c)) {
+            cell.style.background  = '';
+            cell.style.borderColor = '';
+            cell.classList.add('clearing');
+          }
+        });
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      state.grid = savedGrid;
+      const data = await placeProm;
+
+      // Sync color matrix: cleared cells go back to null
+      for (let r = 0; r < SIZE; r++) {
+        for (let c = 0; c < SIZE; c++) {
+          if (!data.grid[r][c]) cellSlots[r][c] = null;
+        }
+      }
+
+      state       = data;
+      lastHovered = null;
+      previewCells = [];
+      previewValid = false;
+      isAnimating = false;
+
+      renderGrid();
+      renderHand();
+      renderScore(data.score);
+      renderHistory(data.history);
+
+      if (data.game_over) {
+        showGameOver(data.score);
+      } else {
+        const lines = data.lines_cleared;
+        setStatus(lines ? `Placed! ${lines} line${lines > 1 ? 's' : ''} cleared` : 'Placed!', 'ok');
+      }
+    }
+
+    // ── Global event listeners ────────────────────────────────────────────────
+
+    document.addEventListener('mousemove', e => onMove(e.clientX, e.clientY));
+    document.addEventListener('mouseup',   e => onDrop(e.clientX, e.clientY));
+
+    document.addEventListener('touchmove', e => {
+      if (!dragging) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      onMove(t.clientX, t.clientY);
+    }, {passive: false});
+
+    document.addEventListener('touchend', e => {
+      if (!dragging) return;
+      const t = e.changedTouches[0];
+      onDrop(t.clientX, t.clientY);
+    });
+
+    // ── Reset ─────────────────────────────────────────────────────────────────
+
+    async function doReset() {
+      document.getElementById('gameover-overlay').classList.add('hidden');
+      if (dragging) { dragging.ghostEl.remove(); dragging = null; }
+      cellSlots   = Array.from({length: SIZE}, () => Array(SIZE).fill(null));
+      lastHovered = null;
+      previewCells = [];
+      previewValid = false;
+      isAnimating = false;
+      const data = await fetch('/api/play/reset', {method: 'POST'}).then(r => r.json());
+      state = data;
+      renderGrid();
+      renderHand();
+      renderScore(data.score);
+      renderHistory(data.history);
+      setStatus('New game started', '');
+    }
+
+    document.getElementById('reset-btn').addEventListener('click', doReset);
+    document.getElementById('gameover-reset-btn').addEventListener('click', doReset);
+
+    fetchState();
+  </script>
+</body>
+</html>

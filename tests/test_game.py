@@ -1,6 +1,6 @@
 import pytest
 
-from engine.block import Block, LINE_2_ACROSS, LINE_2_DOWN, TWO_BY_TWO
+from engine.block import Block, LINE_2_ACROSS, LINE_2_DOWN, LINE_3_DOWN, TWO_BY_TWO
 from engine.game import GameState, StepResult
 from engine.grid import Grid
 from engine.scoring import SimpleScorer
@@ -177,6 +177,60 @@ def test_mid_hand_game_over() -> None:
     gs._hand[2] = HUGE
     result = gs.place(0, 0, 0)
     assert result.game_over is True
+
+
+def test_game_over_after_first_real_placement() -> None:
+    # Board is nearly full. clear_full_lines() scans ALL rows/cols after
+    # each placement, so we must ensure no row or column is ever full —
+    # each is given at least one empty cell that survives the placement.
+    # (0,0)-(1,0) is the only vertical pair; every other gap is an isolated
+    # 1×1 hole, so after slot 0 is placed no LINE_2_DOWN can fit anywhere.
+    cells = [[1] * 8 for _ in range(8)]
+    cells[0][0] = 0   # slot-0 target (top)
+    cells[1][0] = 0   # slot-0 target (bottom)
+    cells[0][2] = 0   # row-0 extra → row 0 stays incomplete after place
+    cells[1][3] = 0   # row-1 extra → row 1 stays incomplete after place
+    cells[5][0] = 0   # col-0 extra → col 0 stays incomplete after place
+    cells[2][7] = 0   # isolated gaps keep remaining rows/cols non-full
+    cells[3][1] = 0
+    cells[4][4] = 0
+    cells[6][5] = 0
+    cells[7][6] = 0
+    gs = GameState(seed=0, pool=SMALL_POOL)
+    gs._grid = Grid(cells=cells)
+    gs._hand = [LINE_2_DOWN, LINE_2_DOWN, LINE_2_DOWN]
+    result = gs.place(0, 0, 0)
+    assert result.game_over is True
+    assert gs.game_over is True
+
+
+def test_game_over_after_second_real_placement() -> None:
+    # Same no-full-row/col constraint as above, but with two target pairs.
+    # After slot 0 fills (0,0)-(1,0), slot 1 (LINE_2_DOWN) can still reach
+    # (0,4)-(1,4) → not game over.  After slot 1 fills that pair, only
+    # LINE_3_DOWN remains; it needs 3 consecutive vertical cells and none
+    # exist, so game over is triggered on the second placement.
+    cells = [[1] * 8 for _ in range(8)]
+    cells[0][0] = 0   # slot-0 target (top)
+    cells[1][0] = 0   # slot-0 target (bottom)
+    cells[0][4] = 0   # slot-1 target (top)
+    cells[1][4] = 0   # slot-1 target (bottom)
+    cells[0][2] = 0   # row-0 extra
+    cells[1][3] = 0   # row-1 extra
+    cells[5][0] = 0   # col-0 extra
+    cells[4][4] = 0   # col-4 extra
+    cells[2][7] = 0
+    cells[3][1] = 0
+    cells[6][5] = 0
+    cells[7][6] = 0
+    gs = GameState(seed=0, pool=SMALL_POOL)
+    gs._grid = Grid(cells=cells)
+    gs._hand = [LINE_2_DOWN, LINE_2_DOWN, LINE_3_DOWN]
+    result = gs.place(0, 0, 0)
+    assert result.game_over is False   # slot 1 still fits at (0,4)-(1,4)
+    result = gs.place(1, 0, 4)
+    assert result.game_over is True    # LINE_3_DOWN has no 3-cell column run
+    assert gs.game_over is True
 
 
 # --- reset ---
