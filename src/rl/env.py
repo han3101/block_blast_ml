@@ -15,6 +15,20 @@ from rl.encoding import NUM_ACTIONS, GRID_SIZE, NUM_SLOTS, decode_action, encode
 _OBS_SHAPE = (NUM_SLOTS + 1, GRID_SIZE, GRID_SIZE)  # (4, 8, 8)
 
 
+def _count_holes(matrix: list[list[int]]) -> int:
+    """Empty cells with a filled cell above them in the same column."""
+    size = len(matrix)
+    holes = 0
+    for col in range(size):
+        found_filled = False
+        for row in range(size):
+            if matrix[row][col]:
+                found_filled = True
+            elif found_filled:
+                holes += 1
+    return holes
+
+
 class BlockBlastEnv(gymnasium.Env):
     """Gymnasium wrapper around GameState.
 
@@ -37,6 +51,8 @@ class BlockBlastEnv(gymnasium.Env):
         pool: tuple[Block, ...] = ALL_BLOCKS,
         line_clear_bonus: float = 0.0,
         game_over_penalty: float = 0.0,
+        hole_coef: float = 0.0,
+        survival_bonus: float = 0.0,
         render_mode: str | None = None,
     ) -> None:
         super().__init__()
@@ -44,6 +60,8 @@ class BlockBlastEnv(gymnasium.Env):
         self._pool = pool
         self._line_clear_bonus = line_clear_bonus
         self._game_over_penalty = game_over_penalty
+        self._hole_coef = hole_coef
+        self._survival_bonus = survival_bonus
         self.render_mode = render_mode
 
         self.observation_space = spaces.Box(
@@ -64,11 +82,18 @@ class BlockBlastEnv(gymnasium.Env):
             raise RuntimeError("env is terminated — call reset() before stepping")
 
         slot, row, col = decode_action(int(action))
+
+        holes_before = _count_holes(self._state.grid.to_matrix()) if self._hole_coef else 0
         result = self._state.place(slot, row, col)  # raises ValueError on illegal action
 
         reward = float(result.score - result.prev_score)
         if self._line_clear_bonus and result.lines_cleared:
             reward += self._line_clear_bonus * result.lines_cleared
+        if self._hole_coef:
+            holes_after = _count_holes(self._state.grid.to_matrix())
+            reward += self._hole_coef * (holes_before - holes_after)
+        if self._survival_bonus:
+            reward += self._survival_bonus
         if self._game_over_penalty and result.game_over:
             reward -= self._game_over_penalty
 

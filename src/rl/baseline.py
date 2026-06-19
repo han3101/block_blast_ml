@@ -1,22 +1,37 @@
-"""Run the greedy agent over N seeded games and report score statistics."""
+"""Benchmark any agent over N seeded games and report score statistics.
+
+Usage
+-----
+Greedy:
+    uv run python -m rl.baseline --model greedy
+
+Policy:
+    uv run python -m rl.baseline --model policy --checkpoint runs/2b_fixed_2M/best_model.pt
+
+Save results to JSON:
+    uv run python -m rl.baseline --model policy --checkpoint <path> --save
+"""
 from __future__ import annotations
 
 import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from engine.game import GameState
 from engine.generator import Mode
-from rl.agents.greedy import choose_action
+from rl.agents.greedy import choose_action as greedy_choose
 from rl.encoding import decode_action
 from rl.types import BenchmarkResult
 
-# uv run python -m rl.baseline
-def run_greedy_baseline(
-    n_games: int = 100,
-    seed_offset: int = 0,
-    mode: Mode = "at_least_one",
+
+def _run_agent(
+    agent_name: str,
+    choose_action: Callable[[GameState], int],
+    n_games: int,
+    seed_offset: int,
+    mode: Mode,
 ) -> BenchmarkResult:
     scores: list[int] = []
     lengths: list[int] = []
@@ -30,46 +45,91 @@ def run_greedy_baseline(
             steps += 1
         scores.append(state.score)
         lengths.append(steps)
-    return BenchmarkResult.from_plays("greedy", scores, lengths, seed_offset=seed_offset)
+    return BenchmarkResult.from_plays(agent_name, scores, lengths, seed_offset=seed_offset)
+
+
+def run_greedy_baseline(
+    n_games: int = 100,
+    seed_offset: int = 0,
+    mode: Mode = "at_least_one",
+) -> BenchmarkResult:
+    return _run_agent("greedy", greedy_choose, n_games, seed_offset, mode)
+
+
+def run_policy_baseline(
+    checkpoint: str | Path,
+    n_games: int = 100,
+    seed_offset: int = 0,
+    mode: Mode = "at_least_one",
+    device: str = "cpu",
+) -> BenchmarkResult:
+    from rl.agents.policy_agent import make_policy_agent
+    choose = make_policy_agent(checkpoint, device=device)
+    name = f"policy:{Path(checkpoint).parent.name}"
+    return _run_agent(name, choose, n_games, seed_offset, mode)
+
+
+def _print_result(result: BenchmarkResult, elapsed: float) -> None:
+    print(f"\n{result.agent}  ({result.n_games} games, {elapsed:.1f}s)")
+    print(f"  score  — mean={result.mean:.1f}  median={result.median:.1f}  "
+          f"stdev={result.stdev:.1f}  max={result.max}  min={result.min}")
+    print(f"  length — mean={result.avg_length:.1f}  median={result.median_length:.1f}  "
+          f"max={result.max_length}")
 
 
 if __name__ == "__main__":
     import argparse
     import time
 
-    parser = argparse.ArgumentParser(description="Run greedy baseline over N seeded games.")
+    parser = argparse.ArgumentParser(
+        description="Benchmark agents over N seeded games.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument("--model", choices=["greedy", "policy"], required=True,
+                        help="which agent to benchmark")
+    parser.add_argument("--checkpoint", type=str, default=None,
+                        help="path to a .pt checkpoint (required for --model policy)")
     parser.add_argument("--n-games", type=int, default=100)
-    parser.add_argument("--save", action="store_true", default=False)
+    parser.add_argument("--seed-offset", type=int, default=0)
+    parser.add_argument("--mode", choices=["at_least_one", "random", "solvable"],
+                        default="at_least_one")
+    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--save", action="store_true", default=False,
+                        help="write results to runs/<name>_<sha>_v<N>.json")
     args = parser.parse_args()
 
-    t0 = time.perf_counter()
-    results = run_greedy_baseline(n_games=args.n_games)
-    elapsed = time.perf_counter() - t0
+    if args.model == "policy" and not args.checkpoint:
+        parser.error("--model policy requires --checkpoint")
 
-    print(f"Greedy baseline over {results.n_games} games ({elapsed:.2f}s):")
-    print(
-        f"  mean={results.mean:.1f}  median={results.median:.1f}"
-        f"  stdev={results.stdev:.1f}  max={results.max}  min={results.min}"
-    )
-    print(
-        f"  avg_length={results.avg_length:.1f}  median_length={results.median_length:.1f}"
-        f"  max_length={results.max_length}"
-    )
+    print(f"Running {args.model} over {args.n_games} games (seeds {args.seed_offset}–"
+          f"{args.seed_offset + args.n_games - 1}, mode={args.mode}) …")
+    t0 = time.perf_counter()
+
+    if args.model == "greedy":
+        result = run_greedy_baseline(args.n_games, args.seed_offset, args.mode)
+    elif args.model == "policy":
+        result = run_policy_baseline(
+            args.checkpoint, args.n_games, args.seed_offset, args.mode, args.device
+        )
+
+    elapsed = time.perf_counter() - t0
+    _print_result(result, elapsed)
 
     if args.save:
         git_commit = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"], text=True
         ).strip()
         timestamp = datetime.now(timezone.utc).isoformat()
+        runs_dir = Path(__file__).parent.parent.parent / "runs"
+        runs_dir.mkdir(exist_ok=True)
+
         record = {
             "git_commit": git_commit,
             "timestamp": timestamp,
-            "elapsed_s": round(elapsed, 2),
-            **results.to_dict(),
+            **result.to_dict(),
         }
-        runs_dir = Path(__file__).parent.parent.parent / "runs"
-        runs_dir.mkdir(exist_ok=True)
-        base = f"greedy_{git_commit}"
+        base = f"{result.agent.replace(':', '_')}_{git_commit}"
         version = 0
         while (runs_dir / f"{base}_v{version}.json").exists():
             version += 1

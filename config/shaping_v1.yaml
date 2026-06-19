@@ -1,0 +1,23 @@
+# Shaping v1 — hole penalty + survival bonus + higher entropy floor.
+#
+# Rationale from 10M unshaped run:
+#   - Entropy collapsed to ~0.20 nats by step 5M (≈1.2 effective actions)
+#   - Policy plateaued at mean ~225 vs greedy ~513, never escaped local optimum
+#   - Raw score delta alone is too sparse: most steps give 1-5 pts (cells placed),
+#     line clears are rare when the policy is still bad → weak gradient signal
+#
+# v1 attempt (hole_coef=1.0) FAILED: hole penalty at cell-placement scale (~1 pt)
+#   swamped the raw score signal — policy learned to avoid holes at cost of scoring.
+#   Eval score regressed to ~150 vs unshaped ~185 at the same step count.
+#
+# v1 fix — scale shaping to ~10% of the per-step score signal:
+#   hole_coef=0.1  — gentle directional nudge, won't override line-clear signal
+#   survival_bonus=0.01 — still 10× the ref's invisible 0.001, but halved from v1
+#   game_over_penalty=2.0 — reduced; raw scoring already punishes dying (score stops)
+#
+# Entropy floor unchanged — ent_coef_final=0.01 was correct, keep it.
+
+hole_coef: 0.1
+survival_bonus: 0.01
+game_over_penalty: 2.0
+ent_coef_final: 0.01

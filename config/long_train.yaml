@@ -1,9 +1,10 @@
-# Extended run — 40M steps, larger batch. Override on top of default.yaml.
+# Extended run preset — override on top of default.yaml.
 total_timesteps: 40000000
+vec_env: async
+
+# Larger rollout window → 14×512 = 7168 transitions per update (vs 1792 default).
+# Same effective batch size as reference's 64 envs × 128 steps, without
+# oversubscribing the CPU. n_envs stays at hardware default (cores - 2 = 14).
+rollout_steps: 512
 batch_size: 2048
 n_epochs: 4
-
-# Throughput: subprocess-per-env parallelism + reference-scale env count.
-# Benchmarked ~2.9x the sync/14-env rollout on a 16-core box (~8k fps).
-vec_env: async
-n_envs: 48

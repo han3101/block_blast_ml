@@ -27,7 +27,7 @@ class TrainConfig:
     gae_lambda: float = 0.95
     clip_coef: float = 0.2
     ent_coef: float = 0.03
-    ent_coef_final: float = 0.005
+    ent_coef_final: float = 0.01
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
     normalize_returns: bool = True
@@ -38,6 +38,8 @@ class TrainConfig:
     # Reward shaping
     line_clear_bonus: float = 0.0
     game_over_penalty: float = 0.0
+    hole_coef: float = 0.0
+    survival_bonus: float = 0.0
     # Environment
     env_mode: Mode = "at_least_one"
     vec_env: str = "sync"            # "sync" (1 process) or "async" (subprocess per core)

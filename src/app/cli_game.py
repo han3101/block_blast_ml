@@ -8,12 +8,14 @@ Usage:
     uv run python -m app.cli_game --delay 0                # as fast as possible
     uv run python -m app.cli_game --delay 1                # 1 second delay
     uv run python -m app.cli_game --step                   # press Enter between moves
+    uv run python -m app.cli_game --checkpoint runs/3M_v1/best_model.pt --delay 0.3  # watch a trained policy play (adjust path as needed)
 """
 from __future__ import annotations
 
 import argparse
 import os
 import time
+from typing import Callable
 
 from engine.block import Block
 from engine.game import GameState
@@ -21,9 +23,15 @@ from engine.generator import Mode
 from rl.agents.greedy import choose_action
 from rl.encoding import decode_action
 
+
+def _policy_not_loaded(state: GameState) -> int:
+    raise RuntimeError("--agent policy requires --checkpoint")
+
+
 # Agent registry — add entries here as new agents are trained/implemented.
-AGENTS = {
+AGENTS: dict[str, Callable[[GameState], int]] = {
     "greedy": choose_action,
+    "policy": _policy_not_loaded,
 }
 
 
@@ -124,18 +132,30 @@ def run(seed: int, delay: float, step_mode: bool, mode: Mode, agent: str) -> Non
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Watch the greedy agent play Block Blast.")
+    parser = argparse.ArgumentParser(description="Watch an agent play Block Blast.")
     parser.add_argument("--seed", type=int, default=None, help="fix the seed for a deterministic replay")
     parser.add_argument("--mode", choices=["at_least_one", "random", "solvable"], default="at_least_one")
     parser.add_argument("--agent", choices=list(AGENTS), default="greedy")
+    parser.add_argument("--checkpoint", type=str, default=None,
+                        help="path to a .pt checkpoint; activates the policy agent")
     parser.add_argument("--delay", type=float, default=0.3,
                         help="seconds between moves (ignored with --step)")
     parser.add_argument("--step", action="store_true",
                         help="press Enter between each move instead of auto-advancing")
     args = parser.parse_args()
+
+    if args.checkpoint:
+        from rl.agents.policy_agent import make_policy_agent
+        AGENTS["policy"] = make_policy_agent(args.checkpoint, device="cpu")
+        agent_name = "policy"
+    else:
+        if args.agent == "policy":
+            parser.error("--agent policy requires --checkpoint")
+        agent_name = args.agent
+
     import random as _random
     seed = args.seed if args.seed is not None else _random.randint(0, 2**31)
-    run(seed=seed, delay=args.delay, step_mode=args.step, mode=args.mode, agent=args.agent)
+    run(seed=seed, delay=args.delay, step_mode=args.step, mode=args.mode, agent=agent_name)
 
 
 if __name__ == "__main__":

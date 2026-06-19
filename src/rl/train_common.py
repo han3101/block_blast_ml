@@ -324,7 +324,7 @@ def train(
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     global_step = 0
-    best_eval_score = -float("inf")
+    best_avg_score = -float("inf")
     if resume_from:
         global_step = load_checkpoint(resume_from, policy, optimizer)
         print(f"resumed from {resume_from} at step {global_step:,}")
@@ -477,24 +477,29 @@ def train(
             mean_clip = float(np.mean(clip_fracs))
             total_loss = mean_pg + cfg.vf_coef * mean_vf - ent_coef * mean_ent
 
-            writer.add_scalar("train/avg_score",        mean_rew,   global_step)
-            writer.add_scalar("train/max_score",        max_rew,    global_step)
-            writer.add_scalar("train/avg_length",       mean_len,   global_step)
-            writer.add_scalar("train/policy_loss",      mean_pg,    global_step)
-            writer.add_scalar("train/value_loss",       mean_vf,    global_step)
-            writer.add_scalar("train/entropy",          mean_ent,   global_step)
-            writer.add_scalar("train/explained_variance", explained_var, global_step)
-            writer.add_scalar("train/total_loss",       total_loss, global_step)
-            writer.add_scalar("train/approx_kl",        mean_kl,    global_step)
-            writer.add_scalar("train/clip_fraction",    mean_clip,  global_step)
-            writer.add_scalar("train/ent_coef",         ent_coef,   global_step)
+            if mean_rew > best_avg_score:
+                best_avg_score = mean_rew
+
+            writer.add_scalar("train/avg_score",        mean_rew,        global_step)
+            writer.add_scalar("train/best_avg_score",   best_avg_score,  global_step)
+            writer.add_scalar("train/max_score",        max_rew,         global_step)
+            writer.add_scalar("train/avg_length",       mean_len,        global_step)
+            writer.add_scalar("train/policy_loss",      mean_pg,         global_step)
+            writer.add_scalar("train/value_loss",       mean_vf,         global_step)
+            writer.add_scalar("train/entropy",          mean_ent,        global_step)
+            writer.add_scalar("train/explained_variance", explained_var,  global_step)
+            writer.add_scalar("train/total_loss",       total_loss,      global_step)
+            writer.add_scalar("train/approx_kl",        mean_kl,         global_step)
+            writer.add_scalar("train/clip_fraction",    mean_clip,       global_step)
+            writer.add_scalar("train/ent_coef",         ent_coef,        global_step)
             writer.add_scalar("train/lr",               scheduler.get_last_lr()[0], global_step)
-            writer.add_scalar("perf/fps",               sps,        global_step)
+            writer.add_scalar("perf/fps",               sps,             global_step)
 
             print(
                 f"[Step {global_step:,}] [{elapsed_str}]\n"
                 f"  fps:            {sps:.0f}\n"
                 f"  avg_score:      {mean_rew:.4f}\n"
+                f"  best_avg_score: {best_avg_score:.4f}\n"
                 f"  max_score:      {max_rew:.0f}\n"
                 f"  avg_length:     {mean_len:.4f}\n"
                 f"  policy_loss:    {mean_pg:.4f}\n"
@@ -513,14 +518,11 @@ def train(
             writer.add_scalar("eval/score_median", ev["score_median"], global_step)
             writer.add_scalar("eval/score_max",    ev["score_max"],    global_step)
             writer.add_scalar("eval/length_mean",  ev["length_mean"],  global_step)
-            if ev["score_mean"] > best_eval_score:
-                best_eval_score = ev["score_mean"]
-                save_best(run_dir, policy, best_eval_score)
-            writer.add_scalar("eval/best_score_mean", best_eval_score, global_step)
+            save_best(run_dir, policy, ev["score_mean"])
             print(
                 f"[eval @ {global_step:,}] score_mean={ev['score_mean']:.1f} "
                 f"median={ev['score_median']:.1f} max={ev['score_max']:.0f} "
-                f"len={ev['length_mean']:.1f}  (best={best_eval_score:.1f}, greedy=242.7)"
+                f"len={ev['length_mean']:.1f}  (greedy=513.1)"
             )
 
         # ---- checkpoint ----

@@ -44,8 +44,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--seed",            type=int)
     p.add_argument("--env-mode",        type=str,   dest="env_mode")
     p.add_argument("--vec-env",         type=str,   dest="vec_env", choices=("sync", "async"))
-    p.add_argument("--line-clear-bonus",type=float, dest="line_clear_bonus")
-    p.add_argument("--game-over-penalty",type=float,dest="game_over_penalty")
+    p.add_argument("--line-clear-bonus",  type=float, dest="line_clear_bonus")
+    p.add_argument("--game-over-penalty", type=float, dest="game_over_penalty")
+    p.add_argument("--hole-coef",         type=float, dest="hole_coef")
+    p.add_argument("--survival-bonus",    type=float, dest="survival_bonus")
     p.add_argument("--checkpoint-interval", type=int, dest="checkpoint_interval")
     p.add_argument("--keep-checkpoints",    type=int, dest="keep_checkpoints")
     p.add_argument("--log-interval",        type=int, dest="log_interval")
@@ -64,6 +66,8 @@ def _make_envs(cfg: TrainConfig):
                 mode=cfg.env_mode,
                 line_clear_bonus=cfg.line_clear_bonus,
                 game_over_penalty=cfg.game_over_penalty,
+                hole_coef=cfg.hole_coef,
+                survival_bonus=cfg.survival_bonus,
             )
             return AutoResetEnv(env)
         return _init
