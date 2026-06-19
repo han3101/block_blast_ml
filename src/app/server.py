@@ -3,11 +3,22 @@ from __future__ import annotations
 import pathlib
 from typing import Annotated
 
+_RUNS_DIR = pathlib.Path(__file__).parent.parent.parent / "runs"
+
+
+def _list_checkpoints() -> list[dict]:
+    if not _RUNS_DIR.exists():
+        return []
+    return [
+        {"run": pt.parent.name, "path": str(pt)}
+        for pt in sorted(_RUNS_DIR.glob("*/best_model.pt"))
+    ]
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from app.session import BLOCK_CATALOG, grid_session, play_session
+from app.session import BLOCK_CATALOG, agent_play_session, grid_session, play_session
 
 app = FastAPI(title="Block Blast")
 
@@ -144,3 +155,45 @@ async def play_preview(
     cells = [[row + dr, col + dc] for dr, dc in block.cells]
     valid = play_session.game.grid.can_place(block, row, col)
     return {"cells": cells, "valid": valid}
+
+
+# ── Agent Play API ────────────────────────────────────────────────────────────
+
+@app.get("/agent_play", response_class=HTMLResponse)
+async def agent_play_page() -> HTMLResponse:
+    return HTMLResponse((_static / "agent_play.html").read_text())
+
+
+@app.get("/api/agent_play/checkpoints")
+async def agent_play_checkpoints() -> dict:
+    return {"checkpoints": _list_checkpoints()}
+
+
+@app.get("/api/agent_play/state")
+async def agent_play_state() -> dict:
+    return agent_play_session.state_dict()
+
+
+class AgentConfigRequest(BaseModel):
+    agent: str
+    checkpoint: str | None = None
+    mode: str = "at_least_one"
+
+
+@app.post("/api/agent_play/configure")
+async def agent_play_configure(req: AgentConfigRequest) -> dict:
+    try:
+        agent_play_session.configure(req.agent, req.checkpoint, req.mode)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return agent_play_session.state_dict()
+
+
+@app.post("/api/agent_play/step")
+async def agent_play_step() -> dict:
+    return agent_play_session.step()
+
+
+@app.post("/api/agent_play/reset")
+async def agent_play_reset() -> dict:
+    return agent_play_session.reset()

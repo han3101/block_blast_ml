@@ -108,7 +108,7 @@ if __name__ == "__main__":
 
     if args.model == "greedy":
         result = run_greedy_baseline(args.n_games, args.seed_offset, args.mode)
-    elif args.model == "policy":
+    else:
         result = run_policy_baseline(
             args.checkpoint, args.n_games, args.seed_offset, args.mode, args.device
         )

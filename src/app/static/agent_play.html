@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Block Blast — Agent Play</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Courier New', monospace;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 28px 32px;
+      user-select: none;
+    }
+    h1 {
+      font-size: 1.1rem;
+      letter-spacing: 3px;
+      color: #7dd3fc;
+      margin-bottom: 24px;
+    }
+    .layout {
+      display: flex;
+      gap: 28px;
+      align-items: flex-start;
+    }
+    .left-panel { display: flex; flex-direction: column; gap: 16px; }
+
+    /* grid */
+    .grid-wrap { display: flex; gap: 4px; }
+    .axis-col { display: flex; flex-direction: column; gap: 3px; padding-top: 22px; }
+    .axis-cell { width: 18px; height: 50px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #475569; }
+    .grid-col { display: flex; flex-direction: column; gap: 3px; }
+    .axis-row { display: flex; gap: 3px; margin-bottom: 3px; }
+    .axis-row-cell { width: 50px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #475569; }
+    .grid-container {
+      display: grid;
+      grid-template-columns: repeat(8, 50px);
+      gap: 3px;
+    }
+    .cell {
+      width: 50px; height: 50px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 4px;
+    }
+    .cell.filled       { background: #3b82f6; border-color: #1d4ed8; }
+    .cell.last-placed  { background: #bfdbfe; border-color: #93c5fd; }
+    @keyframes flash-clear {
+      0%, 100% { background: #2563eb; border-color: #1d4ed8; }
+      50%       { background: #fbbf24; border-color: #f59e0b; }
+    }
+    .cell.clearing { animation: flash-clear 0.48s ease-in-out; }
+
+    /* right panel */
+    .right-panel { display: flex; flex-direction: column; gap: 14px; width: 290px; }
+    .panel {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .panel h3 {
+      font-size: 0.65rem; letter-spacing: 2px; color: #475569;
+      text-transform: uppercase; margin-bottom: 10px;
+    }
+
+    /* config */
+    .config-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .config-row label { font-size: 0.6rem; letter-spacing: 1.5px; color: #475569; text-transform: uppercase; }
+    select, input[type="number"] {
+      background: #0f172a; color: #e2e8f0;
+      border: 1px solid #334155; border-radius: 4px;
+      padding: 6px 8px; font-family: inherit; font-size: 0.8rem;
+      width: 100%;
+    }
+    select:focus, input[type="number"]:focus { outline: 1px solid #3b82f6; border-color: #3b82f6; }
+    select:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* buttons */
+    .btn-row { display: flex; gap: 8px; margin-top: 4px; }
+    button {
+      padding: 9px 14px; border: none; border-radius: 6px;
+      font-family: inherit; font-size: 0.8rem; font-weight: bold;
+      cursor: pointer; letter-spacing: 1px; flex: 1;
+    }
+    button:hover { opacity: 0.85; }
+    #play-btn          { background: #2563eb; color: #fff; }
+    #play-btn.playing  { background: #64748b; }
+    #reset-btn         { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+
+    /* score + stats */
+    .score-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+    .score-label { font-size: 0.65rem; letter-spacing: 2px; color: #475569; text-transform: uppercase; }
+    .score-value { font-size: 1.6rem; font-weight: bold; color: #fbbf24; letter-spacing: 2px; }
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .stat-item { text-align: center; }
+    .stat-label { font-size: 0.6rem; letter-spacing: 1px; color: #475569; text-transform: uppercase; margin-bottom: 2px; }
+    .stat-value { font-size: 1.1rem; font-weight: bold; color: #e2e8f0; }
+    #current-combo.hot { color: #fb923c; }
+
+    /* hand tray */
+    .hand-tray { display: flex; gap: 8px; }
+    .slot-card {
+      flex: 1; min-width: 0;
+      background: #0f172a; border: 2px solid #334155;
+      border-radius: 8px; padding: 8px 6px;
+      display: flex; flex-direction: column; align-items: center; gap: 5px;
+      min-height: 78px;
+    }
+    .slot-card.empty    { opacity: 0.25; }
+    .slot-card.last-used { border-color: #f59e0b !important; }
+    .slot-badge  { font-size: 0.6rem; color: #475569; letter-spacing: 1px; align-self: flex-start; }
+    .slot-shape  { display: flex; align-items: center; justify-content: center; flex: 1; min-height: 34px; }
+    .slot-name   { font-size: 0.55rem; color: #475569; text-align: center; letter-spacing: 0.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+
+    /* history */
+    .history-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
+    .h-item { font-size: 0.72rem; color: #94a3b8; padding: 4px 6px; border-left: 2px solid #334155; }
+    .h-item .hstep  { color: #475569; font-size: 0.65rem; }
+    .h-item .hname  { color: #7dd3fc; }
+    .h-item .hpos   { color: #64748b; }
+    .h-item .hdelta { color: #fbbf24; }
+    .h-item .hlines { color: #86efac; }
+    .h-item .hcombo { color: #fb923c; }
+    .empty-note { font-size: 0.72rem; color: #475569; padding: 4px 0; }
+
+    /* game over overlay */
+    #gameover-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.75);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    #gameover-overlay.hidden { display: none; }
+    .gameover-box {
+      background: #1e293b; border: 1px solid #475569;
+      border-radius: 12px; padding: 36px 52px;
+      text-align: center; display: flex; flex-direction: column; gap: 14px;
+    }
+    .gameover-title { font-size: 1.4rem; letter-spacing: 6px; color: #ef4444; }
+    .gameover-score { font-size: 1rem; color: #fbbf24; letter-spacing: 3px; }
+    .gameover-lines { font-size: 0.8rem; color: #86efac; letter-spacing: 2px; }
+    #gameover-reset-btn { background: #2563eb; color: #fff; padding: 12px 28px; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>BLOCK BLAST — AGENT PLAY</h1>
+
+  <div class="layout">
+    <div class="left-panel">
+      <div class="grid-wrap">
+        <div class="axis-col" id="row-labels"></div>
+        <div class="grid-col">
+          <div class="axis-row" id="col-labels"></div>
+          <div class="grid-container" id="grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="right-panel">
+      <div class="panel">
+        <h3>Configuration</h3>
+        <div class="config-row">
+          <label>Agent</label>
+          <select id="agent-select">
+            <option value="greedy">Greedy (Heuristic)</option>
+          </select>
+        </div>
+        <div class="config-row">
+          <label>Mode</label>
+          <select id="mode-select">
+            <option value="at_least_one">Normal (At Least One)</option>
+            <option value="solvable">Solvable (All Placeable)</option>
+            <option value="random">Random (May Block)</option>
+          </select>
+        </div>
+        <div class="config-row">
+          <label>Delay (seconds)</label>
+          <input type="number" id="delay-input" value="0.5" min="0" max="10" step="0.1">
+        </div>
+        <div class="btn-row">
+          <button id="play-btn">&#9654; PLAY</button>
+          <button id="reset-btn">RESET</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="score-row">
+          <span class="score-label">SCORE</span>
+          <span class="score-value" id="score">0</span>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-label">LINES</div>
+            <div class="stat-value" id="total-lines">0</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">COMBO</div>
+            <div class="stat-value" id="current-combo">0</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">STEPS</div>
+            <div class="stat-value" id="step-count">0</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Current Hand</h3>
+        <div class="hand-tray" id="hand-tray"></div>
+      </div>
+
+      <div class="panel">
+        <h3>History</h3>
+        <div class="history-list" id="history"><span class="empty-note">No moves yet</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="gameover-overlay" class="hidden">
+    <div class="gameover-box">
+      <div class="gameover-title">GAME OVER</div>
+      <div class="gameover-score" id="gameover-score"></div>
+      <div class="gameover-lines" id="gameover-lines"></div>
+      <button id="gameover-reset-btn">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <script>
+    const SIZE = 8;
+    const SLOT_COLORS      = ['#3b82f6', '#a855f7', '#f59e0b'];
+    const SLOT_LABELS      = ['1', '2', '3'];
+
+    let state        = null;
+    let isPlaying    = false;
+    let playTimer    = null;
+    let lastUsedSlot = null;
+
+    // ── Build DOM ─────────────────────────────────────────────────────────────
+
+    (function buildDOM() {
+      const colLabels = document.getElementById('col-labels');
+      for (let c = 0; c < SIZE; c++) {
+        const d = document.createElement('div');
+        d.className = 'axis-row-cell';
+        d.textContent = c;
+        colLabels.appendChild(d);
+      }
+      const rowLabels = document.getElementById('row-labels');
+      for (let r = 0; r < SIZE; r++) {
+        const d = document.createElement('div');
+        d.className = 'axis-cell';
+        d.textContent = r;
+        rowLabels.appendChild(d);
+      }
+      const grid = document.getElementById('grid');
+      for (let r = 0; r < SIZE; r++) {
+        for (let c = 0; c < SIZE; c++) {
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          cell.dataset.r = r;
+          cell.dataset.c = c;
+          grid.appendChild(cell);
+        }
+      }
+    })();
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    function miniBlock(cells, color, cellPx = 13) {
+      if (!cells || !cells.length) return '<span style="color:#475569;font-size:1.2rem;">—</span>';
+      const maxR = Math.max(...cells.map(([r]) => r));
+      const maxC = Math.max(...cells.map(([, c]) => c));
+      const cellSet = new Set(cells.map(([r, c]) => `${r},${c}`));
+      let html = `<div style="display:grid;grid-template-columns:repeat(${maxC + 1},${cellPx}px);gap:2px;">`;
+      for (let r = 0; r <= maxR; r++) {
+        for (let c = 0; c <= maxC; c++) {
+          const bg = cellSet.has(`${r},${c}`) ? color : 'transparent';
+          html += `<div style="width:${cellPx}px;height:${cellPx}px;background:${bg};border-radius:2px;"></div>`;
+        }
+      }
+      return html + '</div>';
+    }
+
+    // ── Rendering ─────────────────────────────────────────────────────────────
+
+    function renderGrid(grid, placedSet = new Set()) {
+      document.querySelectorAll('#grid .cell').forEach(cell => {
+        const r = +cell.dataset.r, c = +cell.dataset.c;
+        const key = `${r},${c}`;
+        cell.className = 'cell';
+        if (placedSet.has(key)) {
+          cell.classList.add('last-placed');
+        } else if (grid[r]?.[c]) {
+          cell.classList.add('filled');
+        }
+      });
+    }
+
+    function renderHand(hand, shapes, usedSlot = null) {
+      const tray = document.getElementById('hand-tray');
+      tray.innerHTML = '';
+      for (let i = 0; i < 3; i++) {
+        const block = hand[i];
+        const shape = shapes[i];
+        const card  = document.createElement('div');
+        card.className = 'slot-card' + (block === null ? ' empty' : '');
+        if (i === usedSlot) card.classList.add('last-used');
+
+        const badge = document.createElement('div');
+        badge.className = 'slot-badge';
+        badge.textContent = `#${SLOT_LABELS[i]}`;
+
+        const shapeDiv = document.createElement('div');
+        shapeDiv.className = 'slot-shape';
+        shapeDiv.innerHTML = miniBlock(shape, SLOT_COLORS[i]);
+
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'slot-name';
+        nameDiv.textContent = block ? block.toUpperCase() : 'USED';
+
+        card.append(badge, shapeDiv, nameDiv);
+        tray.appendChild(card);
+      }
+    }
+
+    function renderStats(score, totalLines, combo, steps) {
+      document.getElementById('score').textContent = score;
+      document.getElementById('total-lines').textContent = totalLines;
+      const comboEl = document.getElementById('current-combo');
+      comboEl.textContent = combo;
+      comboEl.className = combo > 0 ? 'stat-value hot' : 'stat-value';
+      document.getElementById('step-count').textContent = steps;
+    }
+
+    function renderHistory(history) {
+      const el = document.getElementById('history');
+      if (!history || !history.length) {
+        el.innerHTML = '<span class="empty-note">No moves yet</span>';
+        return;
+      }
+      el.innerHTML = [...history].reverse().slice(0, 80).map(h => {
+        const delta = ` <span class="hdelta">+${h.score_delta}pts</span>`;
+        const lines = h.lines_cleared ? ` <span class="hlines">+${h.lines_cleared}L</span>` : '';
+        const combo = h.combo > 0   ? ` <span class="hcombo">x${h.combo + 1}</span>` : '';
+        return `<div class="h-item"><span class="hstep">#${h.step}</span> <span class="hname">${h.block.toUpperCase()}</span><span class="hpos"> (${h.row},${h.col})</span>${delta}${lines}${combo}</div>`;
+      }).join('');
+    }
+
+    function showGameOver(score, lines) {
+      document.getElementById('gameover-score').textContent = `SCORE: ${score}`;
+      document.getElementById('gameover-lines').textContent = `LINES CLEARED: ${lines}`;
+      document.getElementById('gameover-overlay').classList.remove('hidden');
+    }
+
+    function renderAll(data) {
+      renderGrid(data.grid);
+      renderHand(data.hand, data.hand_shapes, lastUsedSlot);
+      renderStats(data.score, data.total_lines, data.current_combo, data.history.length);
+      renderHistory(data.history);
+    }
+
+    // ── Agent step with animation ──────────────────────────────────────────────
+
+    async function doStep() {
+      if (!state || state.game_over) return;
+
+      const prevGrid = state.grid.map(r => [...r]);
+      const data = await fetch('/api/agent_play/step', { method: 'POST' }).then(r => r.json());
+
+      const placedCells = data.last_placed_cells || [];
+      const lastEntry   = data.history.length ? data.history[data.history.length - 1] : null;
+      lastUsedSlot      = lastEntry?.slot ?? null;
+
+      // Reconstruct which rows/cols will be cleared for animation
+      const tempGrid = prevGrid.map(r => [...r]);
+      const placedSet = new Set();
+      for (const [r, c] of placedCells) {
+        if (r >= 0 && r < SIZE && c >= 0 && c < SIZE) {
+          tempGrid[r][c] = 1;
+          placedSet.add(`${r},${c}`);
+        }
+      }
+      const clearRows = new Set();
+      const clearCols = new Set();
+      for (let r = 0; r < SIZE; r++) {
+        if (tempGrid[r].every(v => v === 1)) clearRows.add(r);
+      }
+      for (let c = 0; c < SIZE; c++) {
+        if (tempGrid.every(row => row[c] === 1)) clearCols.add(c);
+      }
+
+      // Show placed cells highlighted on temp grid
+      renderGrid(tempGrid, placedSet);
+      renderHand(data.hand, data.hand_shapes, lastUsedSlot);
+      renderStats(data.score, data.total_lines, data.current_combo, data.history.length);
+
+      if (clearRows.size || clearCols.size) {
+        document.querySelectorAll('#grid .cell').forEach(cell => {
+          if (clearRows.has(+cell.dataset.r) || clearCols.has(+cell.dataset.c)) {
+            cell.classList.remove('filled', 'last-placed');
+            cell.classList.add('clearing');
+          }
+        });
+        await new Promise(res => setTimeout(res, 480));
+      }
+
+      state = data;
+      renderGrid(data.grid);
+      renderHistory(data.history);
+
+      if (data.game_over) {
+        stopPlay();
+        showGameOver(data.score, data.total_lines);
+      }
+    }
+
+    // ── Playback control ──────────────────────────────────────────────────────
+
+    function startPlay() {
+      if (state?.game_over) return;
+      isPlaying = true;
+      const btn = document.getElementById('play-btn');
+      btn.textContent = '⏸ PAUSE';
+      btn.classList.add('playing');
+      document.getElementById('agent-select').disabled = true;
+      document.getElementById('mode-select').disabled  = true;
+      scheduleNext();
+    }
+
+    function stopPlay() {
+      isPlaying = false;
+      if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+      const btn = document.getElementById('play-btn');
+      btn.textContent = '▶ PLAY';
+      btn.classList.remove('playing');
+      document.getElementById('agent-select').disabled = false;
+      document.getElementById('mode-select').disabled  = false;
+    }
+
+    function scheduleNext() {
+      const ms = Math.max(0, parseFloat(document.getElementById('delay-input').value) * 1000);
+      playTimer = setTimeout(playLoop, ms);
+    }
+
+    async function playLoop() {
+      if (!isPlaying) return;
+      await doStep();
+      if (isPlaying && !state?.game_over) scheduleNext();
+    }
+
+    document.getElementById('play-btn').addEventListener('click', () => {
+      if (isPlaying) stopPlay(); else startPlay();
+    });
+
+    // ── Reset ─────────────────────────────────────────────────────────────────
+
+    async function doReset() {
+      stopPlay();
+      document.getElementById('gameover-overlay').classList.add('hidden');
+      lastUsedSlot = null;
+      const data = await fetch('/api/agent_play/reset', { method: 'POST' }).then(r => r.json());
+      state = data;
+      renderAll(data);
+    }
+
+    document.getElementById('reset-btn').addEventListener('click', doReset);
+    document.getElementById('gameover-reset-btn').addEventListener('click', doReset);
+
+    // ── Configure ─────────────────────────────────────────────────────────────
+
+    async function applyConfig() {
+      stopPlay();
+      document.getElementById('gameover-overlay').classList.add('hidden');
+      const val  = document.getElementById('agent-select').value;
+      const mode = document.getElementById('mode-select').value;
+      let agent = val, checkpoint = null;
+      if (val.startsWith('policy:')) {
+        agent      = 'policy';
+        checkpoint = val.slice(7);
+      }
+      lastUsedSlot = null;
+      const data = await fetch('/api/agent_play/configure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent, checkpoint, mode }),
+      }).then(r => r.json());
+      state = data;
+      renderAll(data);
+    }
+
+    document.getElementById('agent-select').addEventListener('change', applyConfig);
+    document.getElementById('mode-select').addEventListener('change', applyConfig);
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+
+    async function loadCheckpoints() {
+      const data = await fetch('/api/agent_play/checkpoints').then(r => r.json());
+      const sel  = document.getElementById('agent-select');
+      for (const ck of (data.checkpoints || [])) {
+        const opt = document.createElement('option');
+        opt.value       = `policy:${ck.path}`;
+        opt.textContent = `Policy — ${ck.run}`;
+        sel.appendChild(opt);
+      }
+      if (state?.agent === 'policy' && state?.checkpoint) {
+        sel.value = `policy:${state.checkpoint}`;
+      }
+    }
+
+    async function init() {
+      const data = await fetch('/api/agent_play/state').then(r => r.json());
+      state = data;
+      document.getElementById('mode-select').value = data.mode || 'at_least_one';
+      renderAll(data);
+      await loadCheckpoints();
+    }
+
+    init();
+  </script>
+</body>
+</html>
