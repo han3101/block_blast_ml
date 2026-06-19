@@ -8,6 +8,11 @@ Greedy:
 Policy:
     uv run python -m rl.baseline --model policy --checkpoint runs/2b_fixed_2M/best_model.pt
 
+Search (Phase 3a lookahead — bake-off over swappable leaf evaluators):
+    uv run python -m rl.baseline --model search --leaf greedy_health
+    uv run python -m rl.baseline --model search --leaf value_net \
+        --checkpoint runs/phase2_v3_curriculum/best_model.pt --horizon 2
+
 Save results to JSON:
     uv run python -m rl.baseline --model policy --checkpoint <path> --save
 """
@@ -69,6 +74,27 @@ def run_policy_baseline(
     return _run_agent(name, choose, n_games, seed_offset, mode)
 
 
+def run_search_baseline(
+    leaf_kind: str,
+    checkpoint: str | Path | None = None,
+    n_games: int = 100,
+    seed_offset: int = 0,
+    mode: Mode = "at_least_one",
+    device: str = "cpu",
+    horizon_hands: int = 1,
+    beam: int = 16,
+    samples: int = 8,
+) -> BenchmarkResult:
+    from rl.agents.search import SearchConfig, make_search_agent
+
+    cfg = SearchConfig(horizon_hands=horizon_hands, beam=beam, samples=samples)
+    choose = make_search_agent(
+        leaf_kind=leaf_kind, checkpoint=checkpoint, cfg=cfg, device=device, seed=seed_offset
+    )
+    name = f"search:{leaf_kind}:h{horizon_hands}b{beam}"
+    return _run_agent(name, choose, n_games, seed_offset, mode)
+
+
 def _print_result(result: BenchmarkResult, elapsed: float) -> None:
     print(f"\n{result.agent}  ({result.n_games} games, {elapsed:.1f}s)")
     print(f"  score  — mean={result.mean:.1f}  median={result.median:.1f}  "
@@ -86,10 +112,21 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--model", choices=["greedy", "policy"], required=True,
+    parser.add_argument("--model", choices=["greedy", "policy", "search"], required=True,
                         help="which agent to benchmark")
     parser.add_argument("--checkpoint", type=str, default=None,
-                        help="path to a .pt checkpoint (required for --model policy)")
+                        help="path to a .pt checkpoint (required for --model policy "
+                             "and --model search --leaf value_net)")
+    parser.add_argument("--leaf", choices=["score_only", "greedy_health", "value_net"],
+                        default="greedy_health",
+                        help="leaf evaluator for --model search (the 3a bake-off)")
+    parser.add_argument("--horizon", type=int, default=1,
+                        help="search horizon in hands (1 = exact current hand + leaf; "
+                             "2+ adds expectimax over future hands)")
+    parser.add_argument("--beam", type=int, default=16,
+                        help="beam width for the within-hand search")
+    parser.add_argument("--samples", type=int, default=8,
+                        help="next-hand Monte-Carlo samples per chance node (horizon>=2)")
     parser.add_argument("--n-games", type=int, default=100)
     parser.add_argument("--seed-offset", type=int, default=0)
     parser.add_argument("--mode", choices=["at_least_one", "random", "solvable"],
@@ -101,6 +138,8 @@ if __name__ == "__main__":
 
     if args.model == "policy" and not args.checkpoint:
         parser.error("--model policy requires --checkpoint")
+    if args.model == "search" and args.leaf == "value_net" and not args.checkpoint:
+        parser.error("--model search --leaf value_net requires --checkpoint")
 
     print(f"Running {args.model} over {args.n_games} games (seeds {args.seed_offset}–"
           f"{args.seed_offset + args.n_games - 1}, mode={args.mode}) …")
@@ -108,9 +147,14 @@ if __name__ == "__main__":
 
     if args.model == "greedy":
         result = run_greedy_baseline(args.n_games, args.seed_offset, args.mode)
-    else:
+    elif args.model == "policy":
         result = run_policy_baseline(
             args.checkpoint, args.n_games, args.seed_offset, args.mode, args.device
+        )
+    else:
+        result = run_search_baseline(
+            args.leaf, args.checkpoint, args.n_games, args.seed_offset, args.mode,
+            args.device, args.horizon, args.beam, args.samples,
         )
 
     elapsed = time.perf_counter() - t0

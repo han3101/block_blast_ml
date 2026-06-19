@@ -94,5 +94,16 @@ class Grid:
         """Return a deep copy of the internal cell matrix."""
         return [row.copy() for row in self._cells]
 
+    def clone(self) -> "Grid":
+        """Return an independent deep copy, skipping constructor re-validation.
+
+        Hot path for search rollouts — assumes the source grid is already valid,
+        so it copies cells directly instead of going through ``_validate_cells``.
+        """
+        new = Grid.__new__(Grid)
+        new.size = self.size
+        new._cells = [row.copy() for row in self._cells]
+        return new
+
     def __str__(self) -> str:
         return "\n".join(" ".join(str(value) for value in row) for row in self._cells)

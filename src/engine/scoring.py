@@ -14,6 +14,7 @@ class Scorer(Protocol):
     def score_placement(self, block_placed: int, lines_cleared: int) -> int: ...
     def end_round(self) -> None: ...
     def reset(self) -> None: ...
+    def clone(self) -> "Scorer": ...
 
 
 class SimpleScorer:
@@ -35,6 +36,11 @@ class SimpleScorer:
 
     def reset(self) -> None:
         self._score = 0
+
+    def clone(self) -> "SimpleScorer":
+        new = SimpleScorer(cell_points=self._cell_points, line_points=self._line_points)
+        new._score = self._score
+        return new
 
 
 class ComboScorer:
@@ -83,3 +89,10 @@ class ComboScorer:
         self._score = 0
         self._N = 0
         self._cleared_this_round = False
+
+    def clone(self) -> "ComboScorer":
+        new = ComboScorer()
+        new._score = self._score
+        new._N = self._N
+        new._cleared_this_round = self._cleared_this_round
+        return new

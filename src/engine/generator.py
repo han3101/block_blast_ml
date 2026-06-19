@@ -49,6 +49,31 @@ class HandGenerator:
         self._pool = pool
         self._mode = mode
 
+    def clone(self) -> "HandGenerator":
+        """Return an independent copy with the RNG positioned identically.
+
+        The cloned generator will deal the *same* future hands as this one
+        (pool and mode shared — both immutable; RNG bit-state copied), so a
+        search rollout off the clone sees the real next-hand distribution.
+        """
+        new = HandGenerator.__new__(HandGenerator)
+        new._rng = random.Random()
+        new._rng.setstate(self._rng.getstate())
+        new._pool = self._pool
+        new._mode = self._mode
+        return new
+
+    def reseed(self, seed: int | None) -> None:
+        """Restart the RNG on a fresh stream (search chance-node sampling).
+
+        ``clone()`` copies the bit-state so a clone deals the *same* future
+        hands — useful for ``restore()``, but a single realization, not the
+        distribution. ``reseed`` lets a search draw an *independent* next hand
+        for the same board, so repeated reseed+deal calls Monte-Carlo the real
+        marginal next-hand distribution. Pool and mode are unchanged.
+        """
+        self._rng.seed(seed)
+
     def deal(self, grid: Grid) -> list[Block] | None:
         """Deal a new hand of blocks for the given board state.
 
