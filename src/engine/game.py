@@ -58,6 +58,18 @@ class GameState:
     def score(self) -> int:
         return self._scorer.score
 
+    @property
+    def combo(self) -> int:
+        """Current combo streak N (multiplier applied this round is N+1).
+
+        0 for scorers without a combo concept (e.g. SimpleScorer)."""
+        return getattr(self._scorer, "combo", 0)
+
+    @property
+    def cleared_this_round(self) -> bool:
+        """Whether any placement in the in-progress round has cleared a line."""
+        return getattr(self._scorer, "cleared_this_round", False)
+
     def legal_actions(self) -> list[tuple[int, int, int]]:
         """Return all (slot, row, col) placements valid on the current grid."""
         actions: list[tuple[int, int, int]] = []

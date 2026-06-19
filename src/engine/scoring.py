@@ -59,6 +59,11 @@ class ComboScorer:
         """Current streak length N (multiplier applied this round is N+1)."""
         return self._N
 
+    @property
+    def cleared_this_round(self) -> bool:
+        """Whether any placement in the current (in-progress) round cleared a line."""
+        return self._cleared_this_round
+
     def score_placement(self, block_placed: int, lines_cleared: int) -> int:
         self._score += block_placed
         if lines_cleared > 0:

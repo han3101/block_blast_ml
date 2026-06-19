@@ -10,7 +10,16 @@ from gymnasium import spaces
 from engine.block import ALL_BLOCKS, Block
 from engine.game import GameState
 from engine.generator import Mode
-from rl.encoding import NUM_ACTIONS, GRID_SIZE, NUM_SLOTS, decode_action, encode_obs, action_mask
+from rl.encoding import (
+    AUX_DIM,
+    NUM_ACTIONS,
+    GRID_SIZE,
+    NUM_SLOTS,
+    action_mask,
+    decode_action,
+    encode_aux,
+    encode_obs,
+)
 
 _OBS_SHAPE = (NUM_SLOTS + 1, GRID_SIZE, GRID_SIZE)  # (4, 8, 8)
 
@@ -32,8 +41,11 @@ def _count_holes(matrix: list[list[int]]) -> int:
 class BlockBlastEnv(gymnasium.Env):
     """Gymnasium wrapper around GameState.
 
-    Observation: (4, 8, 8) float32 — channel 0 is board occupancy,
-      channels 1-3 are hand slot planes (slot i → channel i+1).
+    Observation: Dict with
+      "board" — (4, 8, 8) float32; channel 0 is board occupancy,
+                channels 1-3 are hand slot planes (slot i → channel i+1).
+      "aux"   — (AUX_DIM,) float32 scalar features (combo state, board stats);
+                see rl.encoding.encode_aux.
     Action: Discrete(192) — decoded as (slot, row, col) via rl.encoding.
     Reward: score delta per step, with optional additive shaping.
     Info: always contains 'action_mask', a (192,) bool array.
@@ -64,8 +76,11 @@ class BlockBlastEnv(gymnasium.Env):
         self._survival_bonus = survival_bonus
         self.render_mode = render_mode
 
-        self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=_OBS_SHAPE, dtype=np.float32
+        self.observation_space = spaces.Dict(
+            {
+                "board": spaces.Box(low=0.0, high=1.0, shape=_OBS_SHAPE, dtype=np.float32),
+                "aux": spaces.Box(low=0.0, high=1.0, shape=(AUX_DIM,), dtype=np.float32),
+            }
         )
         self.action_space = spaces.Discrete(NUM_ACTIONS)
 
@@ -110,8 +125,11 @@ class BlockBlastEnv(gymnasium.Env):
 
     # --- helpers ---
 
-    def _obs(self) -> np.ndarray:
-        return np.array(encode_obs(self._state), dtype=np.float32)
+    def _obs(self) -> dict[str, np.ndarray]:
+        return {
+            "board": np.array(encode_obs(self._state), dtype=np.float32),
+            "aux": np.array(encode_aux(self._state), dtype=np.float32),
+        }
 
     def _mask(self) -> np.ndarray:
         return np.array(action_mask(self._state), dtype=bool)

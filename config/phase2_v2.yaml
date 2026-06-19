@@ -1,0 +1,36 @@
+# Phase 2 v2 — clean re-run after the phase-2-v1-review fixes.
+#
+# What changed vs runs/10M_shaped_v1 (commit e1f4c3f):
+#   1. Observation now exposes combo state + board summary (encode_aux / MLP branch)
+#      — fixes the partial-observability bug (review issue 1, 95% confidence).
+#   2. Policy net uses GroupNorm, not BatchNorm — removes the PPO eval/train
+#      statistic confound (review issue 6, 70%).
+#   3. best_model.pt is now selected by best eval score, not latest (issue 2).
+#   4. Greedy baseline is recomputed live and written to baseline.json (issue 4).
+#   5. Rollout scale 16*512 = 8192 transitions/update vs the old 1792 (issue 3, 90%).
+#
+# Reward shaping is held identical to 10M_shaped_v1 so this run isolates the
+# effect of the fixes above. Shaping/curriculum tuning comes in later iterations.
+
+total_timesteps: 10000000
+vec_env: async
+n_envs: 16
+rollout_steps: 512
+batch_size: 2048
+n_epochs: 4
+
+gamma: 0.997
+ent_coef: 0.03
+ent_coef_final: 0.01
+target_kl: 0.02
+normalize_returns: true
+
+# Mild shaping, unchanged from 10M_shaped_v1.
+hole_coef: 0.1
+survival_bonus: 0.01
+game_over_penalty: 2.0
+
+env_mode: at_least_one
+eval_interval: 50
+eval_episodes: 64
+eval_seed_offset: 0

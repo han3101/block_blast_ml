@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from engine.block import Block, LINE_2_DOWN, TWO_BY_TWO
-from rl.encoding import NUM_ACTIONS, GRID_SIZE, NUM_SLOTS, encode_action
+from rl.encoding import AUX_DIM, NUM_ACTIONS, GRID_SIZE, NUM_SLOTS, encode_action
 from rl.env import BlockBlastEnv
 
 _OBS_SHAPE = (NUM_SLOTS + 1, GRID_SIZE, GRID_SIZE)  # (4, 8, 8)
@@ -17,8 +17,10 @@ _OBS_SHAPE = (NUM_SLOTS + 1, GRID_SIZE, GRID_SIZE)  # (4, 8, 8)
 def test_reset_returns_correct_obs_shape() -> None:
     env = BlockBlastEnv()
     obs, info = env.reset(seed=0)
-    assert obs.shape == _OBS_SHAPE
-    assert obs.dtype == np.float32
+    assert obs["board"].shape == _OBS_SHAPE
+    assert obs["board"].dtype == np.float32
+    assert obs["aux"].shape == (AUX_DIM,)
+    assert obs["aux"].dtype == np.float32
 
 
 def test_reset_returns_mask_in_info() -> None:
@@ -38,7 +40,8 @@ def test_reset_mask_has_at_least_one_true() -> None:
 def test_reset_obs_values_in_range() -> None:
     env = BlockBlastEnv()
     obs, _ = env.reset(seed=0)
-    assert np.all((obs == 0.0) | (obs == 1.0))
+    assert np.all((obs["board"] == 0.0) | (obs["board"] == 1.0))
+    assert np.all((obs["aux"] >= 0.0) & (obs["aux"] <= 1.0))
 
 
 def test_reset_clears_previous_state() -> None:
@@ -47,7 +50,8 @@ def test_reset_clears_previous_state() -> None:
     _, info = env.reset(seed=0)
     # Same seed → same initial obs
     obs2, _ = env.reset(seed=0)
-    assert np.array_equal(obs1, obs2)
+    assert np.array_equal(obs1["board"], obs2["board"])
+    assert np.array_equal(obs1["aux"], obs2["aux"])
 
 
 # --- step: reward is score delta ---
@@ -122,8 +126,9 @@ def test_step_obs_shape() -> None:
     _, info = env.reset(seed=0)
     legal_idx = int(np.argmax(info["action_mask"]))
     obs, _, _, _, _ = env.step(legal_idx)
-    assert obs.shape == _OBS_SHAPE
-    assert obs.dtype == np.float32
+    assert obs["board"].shape == _OBS_SHAPE
+    assert obs["board"].dtype == np.float32
+    assert obs["aux"].shape == (AUX_DIM,)
 
 
 def test_step_mask_in_info() -> None:

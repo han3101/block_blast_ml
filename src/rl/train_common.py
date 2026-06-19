@@ -1,9 +1,11 @@
 """Shared PPO training loop: rollout buffer, update, logging, checkpointing."""
 from __future__ import annotations
 
+import json
 import sys
 import time
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterator, cast
@@ -16,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from engine.generator import Mode
 from rl.config import TrainConfig
-from rl.encoding import NUM_ACTIONS
+from rl.encoding import AUX_DIM, NUM_ACTIONS
 from rl.env import BlockBlastEnv
 from rl.policy import BlockBlastPolicy
 
@@ -130,7 +132,8 @@ def evaluate(
     policy.eval()
 
     envs = [BlockBlastEnv(seed=seed_offset + i, mode=mode) for i in range(n_episodes)]
-    obs: list[np.ndarray | None] = [None] * n_episodes
+    boards: list[np.ndarray | None] = [None] * n_episodes
+    auxes: list[np.ndarray | None] = [None] * n_episodes
     masks: list[np.ndarray | None] = [None] * n_episodes
     scores = np.zeros(n_episodes, dtype=np.float64)
     lengths = np.zeros(n_episodes, dtype=np.int64)
@@ -138,20 +141,21 @@ def evaluate(
 
     for i, env in enumerate(envs):
         o, info = env.reset(seed=seed_offset + i)
-        obs[i], masks[i] = o, info["action_mask"]
+        boards[i], auxes[i], masks[i] = o["board"], o["aux"], info["action_mask"]
 
     while not done.all():
         active = np.where(~done)[0]
-        obs_b = torch.from_numpy(np.stack([obs[i] for i in active])).to(device)
+        board_b = torch.from_numpy(np.stack([boards[i] for i in active])).to(device)
+        aux_b = torch.from_numpy(np.stack([auxes[i] for i in active])).to(device)
         mask_b = torch.from_numpy(np.stack([masks[i] for i in active])).to(device)
-        logits, _ = policy(obs_b)
+        logits, _ = policy(board_b, aux_b)
         logits = logits.masked_fill(~mask_b, float("-inf"))
         actions = logits.argmax(dim=-1).cpu().numpy()
         for k, i in enumerate(active):
             o, rew, term, trunc, info = envs[i].step(int(actions[k]))
             scores[i] += rew  # no shaping → reward == score delta
             lengths[i] += 1
-            obs[i], masks[i] = o, info["action_mask"]
+            boards[i], auxes[i], masks[i] = o["board"], o["aux"], info["action_mask"]
             if term or trunc:
                 done[i] = True
 
@@ -176,6 +180,7 @@ class RolloutBuffer:
         T, N = rollout_steps, n_envs
         self.T, self.N = T, N
         self.obs      = np.zeros((T, N, *_OBS_SHAPE), dtype=np.float32)
+        self.aux      = np.zeros((T, N, AUX_DIM), dtype=np.float32)
         self.actions  = np.zeros((T, N), dtype=np.int64)
         self.rewards  = np.zeros((T, N), dtype=np.float32)
         self.dones    = np.zeros((T, N), dtype=np.float32)
@@ -206,6 +211,7 @@ class RolloutBuffer:
         B = self.T * self.N
         return {
             "obs":        torch.from_numpy(self.obs.reshape(B, *_OBS_SHAPE)).to(device),
+            "aux":        torch.from_numpy(self.aux.reshape(B, AUX_DIM)).to(device),
             "actions":    torch.from_numpy(self.actions.reshape(B)).to(device),
             "log_probs":  torch.from_numpy(self.log_probs.reshape(B)).to(device),
             "advantages": torch.from_numpy(self.advantages.reshape(B)).to(device),
@@ -237,8 +243,17 @@ def save_checkpoint(
     return path
 
 
-def save_best(run_dir: Path, policy: BlockBlastPolicy, score: float) -> None:
-    torch.save({"policy": policy.state_dict(), "score": score}, run_dir / "best_model.pt")
+def save_best(run_dir: Path, policy: BlockBlastPolicy, ev: dict[str, float], step: int) -> None:
+    torch.save(
+        {
+            "policy": policy.state_dict(),
+            "score": ev["score_mean"],
+            "score_median": ev["score_median"],
+            "length_mean": ev["length_mean"],
+            "global_step": step,
+        },
+        run_dir / "best_model.pt",
+    )
 
 
 def load_checkpoint(
@@ -297,7 +312,29 @@ def train(
     cfg.save(run_dir / "config.json")
     writer = SummaryWriter(log_dir=str(run_dir / "tb"))
 
-    envs = make_envs(cfg)
+    # Greedy baseline over the exact eval seeds/mode, recomputed on current code so
+    # the eval log compares against a live (not hardcoded/stale) reference.
+    from rl.baseline import run_greedy_baseline
+    greedy = run_greedy_baseline(
+        n_games=cfg.eval_episodes, seed_offset=cfg.eval_seed_offset, mode=cfg.env_mode
+    )
+    greedy_score = greedy.mean
+    (run_dir / "baseline.json").write_text(json.dumps(greedy.to_dict(), indent=2))
+    print(
+        f"greedy baseline (seeds {cfg.eval_seed_offset}-"
+        f"{cfg.eval_seed_offset + cfg.eval_episodes - 1}, mode={cfg.env_mode}): "
+        f"score_mean={greedy_score:.1f} len={greedy.avg_length:.1f}"
+    )
+
+    # Curriculum: open in warmup_mode if enabled, switch to env_mode at warmup_frac.
+    use_curriculum = cfg.warmup_frac > 0.0 and cfg.warmup_mode != cfg.env_mode
+    active_mode = cfg.warmup_mode if use_curriculum else cfg.env_mode
+    envs = make_envs(replace(cfg, env_mode=active_mode))
+    if use_curriculum:
+        print(
+            f"curriculum: warmup in '{cfg.warmup_mode}' until "
+            f"{cfg.warmup_frac:.0%} of steps, then '{cfg.env_mode}'"
+        )
     policy = BlockBlastPolicy().to(device)
 
     if cfg.compile:
@@ -325,11 +362,13 @@ def train(
 
     global_step = 0
     best_avg_score = -float("inf")
+    best_eval_score = -float("inf")
     if resume_from:
         global_step = load_checkpoint(resume_from, policy, optimizer)
         print(f"resumed from {resume_from} at step {global_step:,}")
 
     obs_np, infos = envs.reset(seed=[cfg.seed + i for i in range(cfg.n_envs)])  # type: ignore[arg-type]
+    board_np, aux_np = obs_np["board"], obs_np["aux"]
     mask_np = _extract_masks(infos, cfg.n_envs)
 
     buf = RolloutBuffer(cfg.rollout_steps, cfg.n_envs)
@@ -353,13 +392,32 @@ def train(
         frac = global_step / cfg.total_timesteps
         ent_coef = cfg.ent_coef + (cfg.ent_coef_final - cfg.ent_coef) * frac
 
+        # Curriculum phase switch: rebuild envs in the target mode once, keeping
+        # policy/optimizer/global_step intact. The return normalizer is reset so
+        # the new mode's reward scale isn't biased by warmup-phase statistics.
+        if use_curriculum and active_mode != cfg.env_mode and frac >= cfg.warmup_frac:
+            print(f"[Step {global_step:,}] curriculum switch: '{active_mode}' -> '{cfg.env_mode}'")
+            envs.close()
+            active_mode = cfg.env_mode
+            envs = make_envs(cfg)
+            obs_np, infos = envs.reset(seed=[cfg.seed + 10_000 + i for i in range(cfg.n_envs)])  # type: ignore[arg-type]
+            board_np, aux_np = obs_np["board"], obs_np["aux"]
+            mask_np = _extract_masks(infos, cfg.n_envs)
+            if ret_norm is not None:
+                ret_norm = ReturnNormalizer(cfg.n_envs, cfg.gamma)
+            ep_rew_running[:] = 0.0
+            ep_len_running[:] = 0
+
         # ---- rollout ----
         policy.eval()
         for t in range(cfg.rollout_steps):
             with torch.no_grad():
-                obs_t  = torch.from_numpy(obs_np).to(device)
-                mask_t = torch.from_numpy(mask_np).to(device)
-                action_t, log_prob_t, _, value_t = policy.get_action_and_value(obs_t, mask_t)
+                board_t = torch.from_numpy(board_np).to(device)
+                aux_t   = torch.from_numpy(aux_np).to(device)
+                mask_t  = torch.from_numpy(mask_np).to(device)
+                action_t, log_prob_t, _, value_t = policy.get_action_and_value(
+                    board_t, aux_t, mask_t
+                )
 
             action_np = action_t.cpu().numpy()
             obs_next, rew_np, term_np, trunc_np, infos_next = envs.step(action_np)
@@ -369,7 +427,8 @@ def train(
             # Store the normalized reward for training, keep raw for score logging.
             rew_buf = ret_norm.scale(rew_np, done_np) if ret_norm is not None else rew_np
 
-            buf.obs[t]       = obs_np
+            buf.obs[t]       = board_np
+            buf.aux[t]       = aux_np
             buf.actions[t]   = action_np
             buf.rewards[t]   = rew_buf
             buf.dones[t]     = done_np
@@ -385,13 +444,14 @@ def train(
                 ep_rew_running[i] = 0.0
                 ep_len_running[i] = 0
 
-            obs_np, mask_np = obs_next, mask_next
+            board_np, aux_np, mask_np = obs_next["board"], obs_next["aux"], mask_next
             global_step += cfg.n_envs
 
         # bootstrap value for the state after the rollout
         with torch.no_grad():
             _, _, _, last_val = policy.get_action_and_value(
-                torch.from_numpy(obs_np).to(device),
+                torch.from_numpy(board_np).to(device),
+                torch.from_numpy(aux_np).to(device),
                 torch.from_numpy(mask_np).to(device),
             )
         buf.compute_gae(last_val.cpu().numpy(), cfg.gamma, cfg.gae_lambda)
@@ -415,6 +475,7 @@ def train(
                 break
             for mb_idx in torch.randperm(B, device=device).split(cfg.batch_size):
                 mb_obs   = flat["obs"][mb_idx]
+                mb_aux   = flat["aux"][mb_idx]
                 mb_act   = flat["actions"][mb_idx]
                 mb_lp    = flat["log_probs"][mb_idx]
                 mb_adv   = flat["advantages"][mb_idx]
@@ -425,7 +486,7 @@ def train(
 
                 with torch.autocast(device_type=device.type, enabled=use_autocast):
                     _, new_lp, entropy, new_val = policy.get_action_and_value(
-                        mb_obs, mb_mask, mb_act
+                        mb_obs, mb_aux, mb_mask, mb_act
                     )
                     log_ratio = new_lp - mb_lp
                     ratio = log_ratio.exp()
@@ -518,11 +579,16 @@ def train(
             writer.add_scalar("eval/score_median", ev["score_median"], global_step)
             writer.add_scalar("eval/score_max",    ev["score_max"],    global_step)
             writer.add_scalar("eval/length_mean",  ev["length_mean"],  global_step)
-            save_best(run_dir, policy, ev["score_mean"])
+            is_best = ev["score_mean"] > best_eval_score
+            if is_best:
+                best_eval_score = ev["score_mean"]
+                save_best(run_dir, policy, ev, global_step)
+            writer.add_scalar("eval/best_score_mean", best_eval_score, global_step)
             print(
                 f"[eval @ {global_step:,}] score_mean={ev['score_mean']:.1f} "
                 f"median={ev['score_median']:.1f} max={ev['score_max']:.0f} "
-                f"len={ev['length_mean']:.1f}  (greedy=513.1)"
+                f"len={ev['length_mean']:.1f}  (greedy={greedy_score:.1f}, "
+                f"best={best_eval_score:.1f}{' *' if is_best else ''})"
             )
 
         # ---- checkpoint ----

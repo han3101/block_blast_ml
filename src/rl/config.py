@@ -42,6 +42,11 @@ class TrainConfig:
     survival_bonus: float = 0.0
     # Environment
     env_mode: Mode = "at_least_one"
+    # Curriculum: train in `warmup_mode` for the first `warmup_frac` of timesteps,
+    # then switch to `env_mode` for the rest. warmup_frac=0 disables it. Eval always
+    # uses env_mode, so the curve stays comparable across the switch.
+    warmup_mode: Mode = "solvable"
+    warmup_frac: float = 0.0
     vec_env: str = "sync"            # "sync" (1 process) or "async" (subprocess per core)
     seed: int = 42
     # Eval (deterministic, fixed-seed, vs greedy baseline)

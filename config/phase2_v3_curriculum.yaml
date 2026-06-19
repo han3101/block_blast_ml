@@ -1,0 +1,39 @@
+# Phase 2 v3 — curriculum on top of the v2 fixes.
+#
+# v2 (combo-obs + GroupNorm + scale) matched but did not beat the old baseline:
+# the policy still dies at ~22 placements vs greedy's ~31, so it rarely survives
+# long enough to build the multi-round combo streaks that dominate score.
+#
+# Per the review's Step 3: warm up in 'solvable' (every hand is fully placeable
+# -> long episodes, frequent line clears, real combo exposure) for the first 40%
+# of training, then switch to 'at_least_one' for the remaining 60% to harden the
+# policy on the real distribution. Eval stays on 'at_least_one' throughout so the
+# curve is directly comparable to v2 and greedy.
+#
+# Entropy floor raised (0.01 -> 0.02) so exploration survives the mode switch and
+# doesn't collapse onto the easy-mode policy before adapting to at_least_one.
+
+total_timesteps: 10000000
+vec_env: async
+n_envs: 16
+rollout_steps: 512
+batch_size: 2048
+n_epochs: 4
+
+gamma: 0.997
+ent_coef: 0.03
+ent_coef_final: 0.02
+target_kl: 0.02
+normalize_returns: true
+
+hole_coef: 0.1
+survival_bonus: 0.01
+game_over_penalty: 2.0
+
+env_mode: at_least_one
+warmup_mode: solvable
+warmup_frac: 0.4
+
+eval_interval: 50
+eval_episodes: 64
+eval_seed_offset: 0

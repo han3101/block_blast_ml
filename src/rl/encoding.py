@@ -28,6 +28,27 @@ from engine.game import GameState
 GRID_SIZE = 8
 NUM_SLOTS = 3
 NUM_ACTIONS = NUM_SLOTS * GRID_SIZE * GRID_SIZE  # 192
+NUM_CELLS = GRID_SIZE * GRID_SIZE  # 64
+
+# Auxiliary scalar feature vector exposed alongside the (4,8,8) image.
+# The combo-aware scorer makes the env partially observable from the image
+# alone: identical board+hand can have different value depending on combo
+# state. These scalars restore observability and feed the policy's MLP branch.
+AUX_DIM = 6
+_COMBO_NORM = 10.0  # combo N is uncapped; squash by /10 (clipped) for O(1) input
+
+
+def _count_holes(matrix: list[list[int]]) -> int:
+    """Empty cells with a filled cell above them in the same column."""
+    holes = 0
+    for col in range(GRID_SIZE):
+        found_filled = False
+        for row in range(GRID_SIZE):
+            if matrix[row][col]:
+                found_filled = True
+            elif found_filled:
+                holes += 1
+    return holes
 
 
 def encode_action(slot: int, row: int, col: int) -> int:
@@ -61,6 +82,34 @@ def encode_obs(state: GameState) -> list[list[list[float]]]:
         channels.append(plane)
 
     return channels
+
+
+def encode_aux(state: GameState) -> list[float]:
+    """Return the AUX_DIM scalar feature vector, all normalized to roughly [0, 1].
+
+    Features (in order):
+      0  combo streak N            — min(N, 10) / 10
+      1  cleared-this-round flag   — 0.0 / 1.0
+      2  legal action count        — n_legal / NUM_ACTIONS
+      3  placeable block types     — distinct playable hand slots / NUM_SLOTS
+      4  hole count                — holes / NUM_CELLS
+      5  occupied cell count       — occupied / NUM_CELLS
+    """
+    matrix = state.grid.to_matrix()
+    occupied = sum(matrix[r][c] for r in range(GRID_SIZE) for c in range(GRID_SIZE))
+    holes = _count_holes(matrix)
+
+    legal = state.legal_actions()
+    placeable_slots = len({slot for slot, _, _ in legal})
+
+    return [
+        min(state.combo, _COMBO_NORM) / _COMBO_NORM,
+        1.0 if state.cleared_this_round else 0.0,
+        len(legal) / NUM_ACTIONS,
+        placeable_slots / NUM_SLOTS,
+        holes / NUM_CELLS,
+        occupied / NUM_CELLS,
+    ]
 
 
 def action_mask(state: GameState) -> list[bool]:

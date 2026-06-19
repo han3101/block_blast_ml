@@ -43,6 +43,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--compile",action=argparse.BooleanOptionalAction, default=None)
     p.add_argument("--seed",            type=int)
     p.add_argument("--env-mode",        type=str,   dest="env_mode")
+    p.add_argument("--warmup-mode",     type=str,   dest="warmup_mode")
+    p.add_argument("--warmup-frac",     type=float, dest="warmup_frac")
     p.add_argument("--vec-env",         type=str,   dest="vec_env", choices=("sync", "async"))
     p.add_argument("--line-clear-bonus",  type=float, dest="line_clear_bonus")
     p.add_argument("--game-over-penalty", type=float, dest="game_over_penalty")
