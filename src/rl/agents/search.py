@@ -79,7 +79,7 @@ def _board_health(state: GameState) -> float:
     Returned as a non-positive number (0 = empty board). Used both as the
     within-hand beam ranking proxy and as the ``greedy_health`` leaf future."""
     matrix = state.grid.to_matrix()
-    occupied = sum(v for row in matrix for v in row)
+    occupied = state.grid.count_occupied()  # bitboard popcount, not a cell sum
     holes = _count_holes(matrix)
     return -(float(occupied) + 2.0 * holes)
 
